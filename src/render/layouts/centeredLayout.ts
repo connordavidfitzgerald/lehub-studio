@@ -13,7 +13,7 @@ import {
 } from '../elements'
 import { fitHeader, wrapWords } from '../text/autofit'
 import { getHalftone } from '../halftone/halftoneRenderer'
-import { collectImage, tagCategory, tagHeader, tagSecondary } from '../hit'
+
 
 // Rough badge/line height as a multiple of font size (ascent + descent + pad).
 const BADGE_H = 0.95
