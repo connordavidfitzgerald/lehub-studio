@@ -93,7 +93,7 @@ export function Segmented<T extends string>({
 }
 
 /** Input-style drawer label (matches the TextField label). */
-const drawerLabelClass = 'font-review uppercase text-xs text-black pb-1 py-0.5'
+const drawerLabelClass = 'font-review uppercase text-xs text-black pb-1.5 py-0.5'
 
 function Chevron({ open }: { open: boolean }) {
   return (

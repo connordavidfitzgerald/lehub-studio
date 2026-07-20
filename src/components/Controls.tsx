@@ -56,7 +56,7 @@ const BTN_ON = `${BTN} bg-black text-white hover:bg-black/80`
 // "+ Add text": same button, tighter horizontal padding. Written out rather than
 // appended to BTN so its px isn't fighting the shared px-[10px].
 const ADD_BTN =
-  ' text-xs text-left opacity-40 font-bold transition text-black hover:opacity-50'
+  ' text-xs text-left opacity-30 font-review uppercase transition text-black hover:opacity-50'
 
 // Preset "Save" — greys out until the name field has something in it.
 const SAVE_BTN = `${BTN} shrink-0 bg-black text-white hover:bg-black/80 disabled:cursor-not-allowed disabled:bg-black/20 disabled:hover:bg-black/20`
