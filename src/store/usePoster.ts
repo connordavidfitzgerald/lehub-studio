@@ -11,6 +11,14 @@ import type {
 import { DEFAULT_HALFTONE } from '../config/constants'
 import { PAPERS } from '../config/papers'
 import { CATEGORY_PRESETS } from '../config/categoryPresets'
+import {
+  extractStyle,
+  loadPresets,
+  loadSession,
+  savePresets,
+  saveSession,
+  type Preset,
+} from './presets'
 
 // Every real paper texture (excludes the "None" entry) — all on by default, each
 // seeded at its own default opacity.
@@ -57,6 +65,8 @@ export interface Artboard {
 interface PosterStore {
   artboards: Artboard[]
   currentId: string
+  /** Saved style presets (localStorage-backed). */
+  presets: Preset[]
 
   set: <K extends keyof PosterState>(key: K, value: PosterState[K]) => void
   setHalftone: <K extends keyof HalftoneParams>(
@@ -78,6 +88,12 @@ interface PosterStore {
   setLayout: (layout: LayoutId) => void
   /** Switch the current artboard to the generative layout with a fresh seed. */
   generateLayout: (slideType?: SlideType) => void
+
+  /** Save the current artboard's look as a named preset. */
+  savePreset: (name: string) => void
+  /** Apply a preset's look to the current artboard, leaving its text alone. */
+  applyPreset: (id: string) => void
+  deletePreset: (id: string) => void
 }
 
 let seq = 0
@@ -106,6 +122,7 @@ function createDefaultState(): PosterState {
     slideType: 'main',
     genAlign: 'auto',
     genHeaderWidth: 'auto',
+    genImageAlign: 'auto',
 
     halftone: { ...DEFAULT_HALFTONE },
   }
@@ -121,11 +138,37 @@ function mapCurrent(
   )
 }
 
-const firstBoard: Artboard = { id: uid(), state: createDefaultState() }
+/**
+ * Rebuild the artboards from a stored session. Each state is spread over a fresh
+ * default so a session saved before a field existed still loads (it just picks up
+ * that field's default). Images can't be stored, so they come back empty.
+ */
+function restoreArtboards(): { artboards: Artboard[]; currentId: string } | null {
+  const stored = loadSession()
+  if (!stored) return null
+  const artboards = stored.artboards.map(({ id, state }) => ({
+    id,
+    state: { ...createDefaultState(), ...state, image: null } as PosterState,
+  }))
+  const currentId = artboards.some((a) => a.id === stored.currentId)
+    ? stored.currentId
+    : artboards[0].id
+  return { artboards, currentId }
+}
+
+const restored = restoreArtboards()
+/** True when this session came back from localStorage rather than starting fresh. */
+export const sessionRestored = restored !== null
+
+const initial = restored ?? (() => {
+  const board: Artboard = { id: uid(), state: createDefaultState() }
+  return { artboards: [board], currentId: board.id }
+})()
 
 export const usePoster = create<PosterStore>((set) => ({
-  artboards: [firstBoard],
-  currentId: firstBoard.id,
+  artboards: initial.artboards,
+  currentId: initial.currentId,
+  presets: loadPresets(),
 
   set: (key, value) =>
     set((store) => ({
@@ -230,7 +273,58 @@ export const usePoster = create<PosterStore>((set) => ({
         seed: (Math.random() * 2 ** 31) >>> 0,
       })),
     })),
+
+  savePreset: (name) =>
+    set((store) => {
+      const trimmed = name.trim()
+      if (!trimmed) return {}
+      const cur = store.artboards.find((a) => a.id === store.currentId)
+      if (!cur) return {}
+      const style = extractStyle(cur.state)
+      // Re-saving under an existing name overwrites it rather than duplicating.
+      const existing = store.presets.find((p) => p.name === trimmed)
+      const presets = existing
+        ? store.presets.map((p) => (p.id === existing.id ? { ...p, style } : p))
+        : [...store.presets, { id: uid(), name: trimmed, style }]
+      savePresets(presets)
+      return { presets }
+    }),
+
+  applyPreset: (id) =>
+    set((store) => {
+      const preset = store.presets.find((p) => p.id === id)
+      if (!preset) return {}
+      return {
+        // Style only — header, category, paragraphs, image and seed stay put.
+        artboards: mapCurrent(store, (s) => ({
+          ...s,
+          ...preset.style,
+          paperIds: [...preset.style.paperIds],
+          paperOpacities: { ...preset.style.paperOpacities },
+          halftone: { ...preset.style.halftone },
+        })),
+      }
+    }),
+
+  deletePreset: (id) =>
+    set((store) => {
+      const presets = store.presets.filter((p) => p.id !== id)
+      savePresets(presets)
+      return { presets }
+    }),
 }))
+
+// Persist the artboards on change, debounced so slider drags and typing don't
+// thrash localStorage. Images are dropped by saveSession — they can't be stored.
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+usePoster.subscribe((store, prev) => {
+  if (store.artboards === prev.artboards && store.currentId === prev.currentId) return
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(
+    () => saveSession({ artboards: store.artboards, currentId: store.currentId }),
+    400,
+  )
+})
 
 /** The current artboard's poster state (re-renders when it changes). */
 export function useCurrentState(): PosterState {

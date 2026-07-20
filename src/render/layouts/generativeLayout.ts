@@ -23,7 +23,7 @@ import { fitHeader } from '../text/autofit'
 import { getHalftone } from '../halftone/halftoneRenderer'
 
 /** Small deterministic PRNG (mulberry32) so a seed always yields the same layout. */
-function mulberry32(seed: number) {
+export function mulberry32(seed: number) {
   let a = seed >>> 0
   return () => {
     a = (a + 0x6d2b79f5) | 0
@@ -34,10 +34,35 @@ function mulberry32(seed: number) {
 }
 
 type Rect = { x: number; y: number; w: number; h: number }
-type ImageMode = 'band-top' | 'band-bottom' | 'band-left' | 'band-right' | 'full' | 'none'
+export type ImageMode = 'band-top' | 'band-bottom' | 'band-left' | 'band-right' | 'full'
 
 /** Secondary paragraph containers span this many grid columns, independent of the header. */
 const SECONDARY_COLS = 6
+
+/**
+ * Consume the two image draws at the head of the seeded sequence. Exported so the
+ * Controls panel can label the image-position control to match the generated band
+ * (top/bottom for a band across the poster, left/right for one down a side) — call
+ * it with `mulberry32(seed)`. Must stay the first two draws, or layouts reshuffle.
+ */
+export function planImage(rand: () => number): { mode: ImageMode; bandFrac: number } {
+  const modes: ImageMode[] = ['band-top', 'band-bottom', 'band-left', 'band-right', 'full']
+  const mode = modes[Math.floor(rand() * modes.length)]
+  const bandFrac = 3 + Math.floor(rand() * 4) // randInt(3, 6)
+  return { mode, bandFrac }
+}
+
+/** The axis the band slides along, i.e. which labels the position control shows. */
+export function imageAlignAxis(mode: ImageMode): 'vertical' | 'horizontal' {
+  return mode === 'band-left' || mode === 'band-right' ? 'horizontal' : 'vertical'
+}
+
+/** Where the seeded mode puts the band — `full` has no band to move. */
+export function seededBandPos(mode: ImageMode): 'start' | 'end' | null {
+  if (mode === 'band-top' || mode === 'band-left') return 'start'
+  if (mode === 'band-bottom' || mode === 'band-right') return 'end'
+  return null
+}
 
 /**
  * Procedurally arrange the poster elements on the 10-column grid from `state.seed`.
@@ -60,30 +85,52 @@ export function drawGenerativeLayout(env: RenderEnv): void {
   //        choices whether or not an image is present. Without an image there is NO
   //        image slot (text uses the full canvas); adding an image afterwards
   //        reflows the *same* layout with the band carved in. ---
-  const imageModePick = pick<ImageMode>(['band-top', 'band-bottom', 'band-left', 'band-right', 'full'])
-  const bandFrac = randInt(3, 6)
+  const { mode: imageModePick, bandFrac } = planImage(rand)
+
+  // The band slides along one axis; `genImageAlign` overrides the seeded end.
+  // A centred band splits the canvas in two, so the text keeps the side the seed
+  // originally gave it — that preserves the generated composition's character.
+  const seededPos = seededBandPos(imageModePick)
+  const bandPos = state.genImageAlign === 'auto' ? seededPos : state.genImageAlign
 
   let tz: Rect = { x: 0, y: 0, w, h }
   let imgRect: Rect | null = null
   if (state.image) {
-    if (imageModePick === 'band-top') {
+    if (imageModePick === 'full') {
+      imgRect = { x: 0, y: 0, w, h } // full-bleed, nowhere to slide
+    } else if (imageAlignAxis(imageModePick) === 'vertical') {
       const bh = h * (bandFrac / 10)
-      imgRect = { x: 0, y: 0, w, h: bh }
-      tz = { x: 0, y: bh, w, h: h - bh }
-    } else if (imageModePick === 'band-bottom') {
-      const bh = h * (bandFrac / 10)
-      imgRect = { x: 0, y: h - bh, w, h: bh }
-      tz = { x: 0, y: 0, w, h: h - bh }
-    } else if (imageModePick === 'band-left') {
-      const bw = bandFrac * colW
-      imgRect = { x: 0, y: 0, w: bw, h }
-      tz = { x: bw, y: 0, w: w - bw, h }
-    } else if (imageModePick === 'band-right') {
-      const bw = bandFrac * colW
-      imgRect = { x: w - bw, y: 0, w: bw, h }
-      tz = { x: 0, y: 0, w: w - bw, h }
+      const rest = h - bh
+      if (bandPos === 'start') {
+        imgRect = { x: 0, y: 0, w, h: bh }
+        tz = { x: 0, y: bh, w, h: rest }
+      } else if (bandPos === 'end') {
+        imgRect = { x: 0, y: rest, w, h: bh }
+        tz = { x: 0, y: 0, w, h: rest }
+      } else {
+        imgRect = { x: 0, y: rest / 2, w, h: bh }
+        // Text takes the half it had before: seeded-top band ⇒ text below.
+        tz =
+          seededPos === 'start'
+            ? { x: 0, y: rest / 2 + bh, w, h: rest / 2 }
+            : { x: 0, y: 0, w, h: rest / 2 }
+      }
     } else {
-      imgRect = { x: 0, y: 0, w, h } // full-bleed
+      const bw = bandFrac * colW
+      const rest = w - bw
+      if (bandPos === 'start') {
+        imgRect = { x: 0, y: 0, w: bw, h }
+        tz = { x: bw, y: 0, w: rest, h }
+      } else if (bandPos === 'end') {
+        imgRect = { x: rest, y: 0, w: bw, h }
+        tz = { x: 0, y: 0, w: rest, h }
+      } else {
+        imgRect = { x: rest / 2, y: 0, w: bw, h }
+        tz =
+          seededPos === 'start'
+            ? { x: rest / 2 + bw, y: 0, w: rest / 2, h }
+            : { x: 0, y: 0, w: rest / 2, h }
+      }
     }
   }
 

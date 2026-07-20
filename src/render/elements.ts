@@ -13,9 +13,6 @@ import { buildNotchedOutline, fillOutline } from './text/notchedOutline'
 
 export type HAlign = 'left' | 'center' | 'right'
 
-/** Callback reporting the bounding box a draw produced, for building click regions. */
-export type Bounds = (x: number, y: number, w: number, h: number) => void
-
 /** Canvas `letterSpacing` isn't typed in every TS lib version; set it defensively. */
 function setTracking(ctx: CanvasRenderingContext2D, px: number): void {
   ;(ctx as unknown as { letterSpacing: string }).letterSpacing = `${px}px`
@@ -56,7 +53,6 @@ export function drawHeaderBlock(
   block: HeaderBlock,
   blockTop: number,
   shortEdge: number,
-  onBounds?: Bounds,
 ): void {
   const { lines, size, containerX, containerWidth, align, lineAdvance } = block
   const outlineColor = block.outlineColor ?? OUTLINE_COLOR
@@ -67,8 +63,6 @@ export function drawHeaderBlock(
   ctx.textBaseline = 'alphabetic'
   ctx.textAlign = 'left'
 
-  let minX = Infinity
-  let maxX = -Infinity
   lines.forEach((raw, i) => {
     const text = raw.toUpperCase()
     const line = measureLine(ctx, text)
@@ -78,9 +72,6 @@ export function drawHeaderBlock(
     if (align === 'left') originX = containerX + pad
     else if (align === 'right') originX = containerX + containerWidth - pad - line.width
     else originX = containerX + (containerWidth - line.width) / 2
-
-    minX = Math.min(minX, originX - pad)
-    maxX = Math.max(maxX, originX + line.width + pad)
 
     const baselineY = blockTop + i * lineAdvance + pad + line.capAscent
 
@@ -94,9 +85,6 @@ export function drawHeaderBlock(
       ctx.fillText(g.char, originX + g.left, baselineY)
     }
   })
-  if (onBounds && lines.length) {
-    onBounds(minX, blockTop, maxX - minX, lines.length * lineAdvance)
-  }
 }
 
 /**
@@ -117,7 +105,6 @@ export function drawBadge(
   bg: string,
   padPx: number,
   tracking = 0,
-  onBounds?: Bounds,
 ): number {
   setTracking(ctx, size * tracking)
   ctx.font = fontString(font, size)
@@ -140,7 +127,6 @@ export function drawBadge(
   ctx.fillStyle = TEXT_COLOR
   ctx.fillText(text, boxX + padPx, topY + padPx + ascent)
   setTracking(ctx, 0)
-  onBounds?.(boxX, topY, boxW, boxH)
   return boxH
 }
 
@@ -262,7 +248,6 @@ export function drawParagraph(
   containerWidth: number,
   bg: string,
   padPx: number,
-  onBounds?: Bounds,
 ): number {
   const { lines, height } = measureParagraph(ctx, text, size, containerWidth, padPx)
   const n = lines.length
@@ -297,7 +282,6 @@ export function drawParagraph(
     ctx.fillText(line, boxX + padPx, topY + padPx + asc + i * lineH)
   })
   setTracking(ctx, 0)
-  onBounds?.(boxX, topY, n > 1 ? containerWidth : lastWidth, height)
   return height
 }
 
@@ -397,7 +381,6 @@ export function drawFittedParagraphs(
   bg: string,
   padPx: number,
   alignOverride?: HAlign,
-  onBounds?: Bounds,
 ): number {
   const lines = buildFittedLines(
     ctx,
@@ -409,18 +392,12 @@ export function drawFittedParagraphs(
   const gap = size * SECONDARY_LINE_GAP
   const cx = (leftX + rightX) / 2
   let y = topY
-  let minX = Infinity
-  let maxX = -Infinity
   lines.forEach((l, i) => {
     if (i > 0) y += gap
     const anchorX = l.align === 'left' ? leftX : l.align === 'right' ? rightX : cx
-    const boxH = drawBadge(ctx, l.text, SECONDARY_FONT, size, anchorX, y, l.align, bg, padPx, SECONDARY_TRACKING, (bx, _by, bw) => {
-      minX = Math.min(minX, bx)
-      maxX = Math.max(maxX, bx + bw)
-    })
+    const boxH = drawBadge(ctx, l.text, SECONDARY_FONT, size, anchorX, y, l.align, bg, padPx, SECONDARY_TRACKING)
     y += boxH
   })
-  if (onBounds && lines.length) onBounds(minX, topY, maxX - minX, y - topY)
   return y - topY
 }
 
@@ -458,7 +435,6 @@ export function drawSecondaryItem(
   padPx: number,
   align: HAlign,
   paraWidth: number,
-  onBounds?: Bounds,
 ): number {
   if (!p.text.trim()) return 0
   if (p.style === 'paragraph') {
@@ -468,9 +444,9 @@ export function drawSecondaryItem(
         : align === 'right'
           ? rightX - paraWidth
           : leftX + (rightX - leftX - paraWidth) / 2
-    return drawParagraph(ctx, p.text, size, boxX, topY, paraWidth, bg, padPx, onBounds)
+    return drawParagraph(ctx, p.text, size, boxX, topY, paraWidth, bg, padPx)
   }
-  return drawFittedParagraphs(ctx, [p], size, leftX, rightX, topY, bg, padPx, align, onBounds)
+  return drawFittedParagraphs(ctx, [p], size, leftX, rightX, topY, bg, padPx, align)
 }
 
 /**

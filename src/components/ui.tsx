@@ -6,11 +6,11 @@ import type { SecondaryPos, TextAlign } from '../types'
  * line-height. Shared by section titles, the page title and the artboards label.
  */
 export const labelClass =
-  'block w-fit bg-black font-review text-sm uppercase leading-none text-white px-[10px] pt-[5px] pb-[6px]'
+  'block w-fit font-review uppercase text-md leading-none text-black px-2 py-1'
 
 /** Smaller chip for nested sub-sections (e.g. Header/Text inside Content). */
 export const subLabelClass =
-  'block w-fit bg-black font-review text-xs uppercase leading-none text-white px-[8px] pt-[4px] pb-[5px]'
+  'block w-fit font-review text-sm  leading-none text-black px-2.5 py-1'
 
 export function Section({
   title,
@@ -74,7 +74,7 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-2 px-1">
       {options.map((o) => (
         <button
           key={o.value}
@@ -93,7 +93,7 @@ export function Segmented<T extends string>({
 }
 
 /** Input-style drawer label (matches the TextField label). */
-const drawerLabelClass = 'font-review text-xs uppercase text-black'
+const drawerLabelClass = 'font-review uppercase text-xs text-black pb-1 py-0.5'
 
 function Chevron({ open }: { open: boolean }) {
   return (
@@ -116,10 +116,13 @@ export function Drawer({
   label,
   children,
   defaultOpen = false,
+  padded = false,
 }: {
   label: string
   children: ReactNode
   defaultOpen?: boolean
+  /** Inset the children by px-1, matching the Segmented controls' gutter. */
+  padded?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -132,7 +135,9 @@ export function Drawer({
         <span>{label}</span>
         <Chevron open={open} />
       </button>
-      {open && <div className="flex flex-col gap-2">{children}</div>}
+      {open && (
+        <div className={`flex flex-col gap-2 ${padded ? 'px-1' : ''}`}>{children}</div>
+      )}
     </div>
   )
 }
@@ -221,6 +226,31 @@ export function HalfIcon({ half }: { half: 'top' | 'bottom' }) {
   return (
     <IconFrame>
       <rect x={1} y={half === 'top' ? 1 : 9} width={22} height={8} fill="currentColor" />
+    </IconFrame>
+  )
+}
+
+/**
+ * Image-position icon: the image band drawn where it will sit — across the poster
+ * at top / middle / bottom, or down a side at left / middle / right. The empty
+ * part of the frame is where the text reflows to.
+ */
+export function ImageAlignIcon({
+  align,
+  axis,
+}: {
+  align: 'start' | 'middle' | 'end'
+  axis: 'vertical' | 'horizontal'
+}) {
+  const at = (start: number, mid: number, end: number) =>
+    align === 'start' ? start : align === 'end' ? end : mid
+  return (
+    <IconFrame>
+      {axis === 'vertical' ? (
+        <rect x={1} y={at(1, 6, 11)} width={22} height={6} fill="currentColor" />
+      ) : (
+        <rect x={at(1, 8, 15)} y={1} width={8} height={16} fill="currentColor" />
+      )}
     </IconFrame>
   )
 }
@@ -329,7 +359,7 @@ export function IconChoice<T extends string>({
   cols?: number
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 px-1">
       {label && <div className={drawerLabelClass}>{label}</div>}
       <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {options.map((o) => (
@@ -368,8 +398,8 @@ export function Slider({
   format?: (v: number) => string
 }) {
   return (
-    <label className="block">
-      <div className=" flex justify-between text-[10px] font-bold uppercase text-black">
+    <label className="block mt-0.5">
+      <div className="flex justify-between text-xs px-1 font-mono uppercase text-black">
         <span>{label}</span>
         <span className="">
           {format ? format(value) : value}
@@ -382,7 +412,7 @@ export function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="slider w-full"
+        className="slider w-full px-1"
       />
     </label>
   )
@@ -402,10 +432,10 @@ export function TextField({
   rows?: number
 }) {
   const cls =
-    'w-full border border-black bg-white px-3 py-2 text-sm text-black font-medium outline-none focus:ring-1 focus:ring-black'
+    'w-full border border-black bg-white px-2 py-2 text-sm leading-tight text-black font-medium outline-none focus:ring-1 focus:ring-black'
   return (
-    <label className="block">
-      {label && <div className="mb-1 font-review uppercase text-xs text-black">{label}</div>}
+    <label className="block px-1">
+      {label && <div className="py-1 font-review uppercase text-xs text-black">{label}</div>}
       {multiline ? (
         <textarea
           value={value}

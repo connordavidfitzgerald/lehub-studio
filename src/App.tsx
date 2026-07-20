@@ -4,13 +4,14 @@ import { Controls } from './components/Controls'
 import { PosterPreview } from './components/PosterPreview'
 import { labelClass } from './components/ui'
 import { usePlaceholderImages } from './hooks/usePlaceholderImages'
-import { DEFAULT_CATEGORY, usePoster } from './store/usePoster'
+import { DEFAULT_CATEGORY, sessionRestored, usePoster } from './store/usePoster'
 
 function App() {
   // Load the default category's placeholder image onto the initial artboard once
-  // it's ready (only while that artboard is still the untouched default).
+  // it's ready (only while that artboard is still the untouched default). Skipped
+  // for a restored session: its artboards are the user's, not a fresh default.
   const placeholders = usePlaceholderImages()
-  const inited = useRef(false)
+  const inited = useRef(sessionRestored)
   useEffect(() => {
     if (inited.current) return
     const img = placeholders[DEFAULT_CATEGORY]
@@ -25,18 +26,18 @@ function App() {
 
   return (
     <div className="flex h-full w-full bg-white text-black">
+      <aside className="flex w-[356px] shrink-0 flex-col gap-2 p-2 ">
+        <h1 className="text-xl px-2.5 py-1 font-review">Le HUB Poster Studio</h1>
+        <div className="min-h-0 flex-1">
+          <Controls />
+        </div>
+      </aside>
       <main className="relative min-w-0 flex-1">
         <PosterPreview />
-        <div className="absolute left-0 top-0 p-2">
-          <h1 className={labelClass}>Le HUB Poster Studio</h1>
-        </div>
         <div className="absolute bottom-0 left-0 max-w-full p-2">
           <ArtboardStrip />
         </div>
       </main>
-      <aside className="flex w-[356px] shrink-0 flex-col p-2">
-        <Controls />
-      </aside>
     </div>
   )
 }

@@ -5,7 +5,7 @@ import {
 } from '../config/constants'
 import { getPalette } from '../config/palettes'
 import type { PosterState } from '../types'
-import type { HitRegion, RenderAssets, RenderEnv } from './env'
+import type { RenderAssets, RenderEnv } from './env'
 import { grid } from './grid'
 import { drawCenteredLayout } from './layouts/centeredLayout'
 import { drawEditorialLayout } from './layouts/editorialLayout'
@@ -25,7 +25,6 @@ export function renderPoster(
   h: number,
   assets: RenderAssets,
   renderScale = 1,
-  collect?: (region: HitRegion) => void,
 ): void {
   const palette = getPalette(state.paletteId)
   const shortEdge = Math.min(w, h)
@@ -49,7 +48,6 @@ export function renderPoster(
     logoHeight: shortEdge * LOGO_HEIGHT_RATIO,
     assets,
     renderScale,
-    collect,
   }
 
   // 2. Layout content (halftone image + text + logo)

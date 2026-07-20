@@ -137,7 +137,7 @@ export function ArtboardStrip() {
 
   return (
     <div className="flex shrink-0 flex-col gap-2">
-      <h2 className={labelClass}>Artboards</h2>
+
       <div className="flex items-center gap-2 overflow-x-auto">
         {artboards.map((ab) => (
           <ArtboardThumb

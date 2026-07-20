@@ -62,6 +62,13 @@ export type GenAlign = TextAlign | 'auto'
 export type SecondaryStyle = 'fitted' | 'paragraph'
 /** Generative header width: auto (procedural) or a fixed column span. */
 export type GenHeaderWidth = 'auto' | 'narrow' | 'wide' | 'full'
+/**
+ * Generative image band position. Moves the image region within the poster; the
+ * text zone reflows into the space left over. Axis-neutral because the seeded band
+ * decides the axis — `start` reads as top for a band across the poster and as left
+ * for one down a side. `auto` keeps the seeded position.
+ */
+export type GenImageAlign = 'auto' | 'start' | 'middle' | 'end'
 
 /** Editorial layout: how a paragraph container aligns horizontally. */
 export type ContainerSide = 'left' | 'center' | 'right'
@@ -123,6 +130,8 @@ export interface PosterState {
   genAlign: GenAlign
   /** Generative layout: header column span (auto = procedural). */
   genHeaderWidth: GenHeaderWidth
+  /** Generative layout: where the image band sits (`auto` = seeded position). */
+  genImageAlign: GenImageAlign
 
   image: HTMLImageElement | null
   halftone: HalftoneParams

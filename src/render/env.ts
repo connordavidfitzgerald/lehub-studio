@@ -7,22 +7,6 @@ export interface RenderAssets {
   papers: Record<string, HTMLImageElement | null>
 }
 
-/** What an on-canvas region maps to, for click-to-edit / image-change overlays. */
-export type HitTarget =
-  | { kind: 'header' }
-  | { kind: 'category' }
-  | { kind: 'secondary'; index: number }
-  | { kind: 'image' }
-
-/** A rectangle on the poster (in poster pixels) tied to an editable target. */
-export interface HitRegion {
-  target: HitTarget
-  x: number
-  y: number
-  w: number
-  h: number
-}
-
 /** Everything a layout needs to draw one poster. */
 export interface RenderEnv {
   ctx: CanvasRenderingContext2D
@@ -39,6 +23,4 @@ export interface RenderEnv {
   assets: RenderAssets
   /** >1 when exporting at higher resolution. */
   renderScale: number
-  /** Optional sink for editable regions (preview only; unused on export). */
-  collect?: (region: HitRegion) => void
 }

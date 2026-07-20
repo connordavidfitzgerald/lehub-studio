@@ -1,6 +1,14 @@
 @import "tailwindcss";
 
 @font-face {
+    font-family: "Neue Montreal Mono";
+    src: url("./fonts/PPNeueMontrealMono-Book.otf") format("opentype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
     font-family: "Review";
     src: url("./fonts/ReviewCondensed-Black.otf") format("opentype");
     font-weight: 700;
@@ -38,6 +46,8 @@
 
 @theme inline {
     --font-review: "Review Bold";
+    --font-helvetica: "Helvetica";
+    --font-mono: "Neue Montreal Mono";
 }
 
 html,

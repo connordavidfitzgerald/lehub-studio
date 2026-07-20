@@ -15,7 +15,6 @@ import {
 } from '../elements'
 import { fitHeader } from '../text/autofit'
 import { getHalftone } from '../halftone/halftoneRenderer'
-import { collectImage, tagCategory, tagHeader, tagSecondary } from '../hit'
 
 /** Paragraph-style secondary containers span this many grid columns in the split layout. */
 const SPLIT_PARA_COLS = 5
@@ -69,7 +68,7 @@ function drawSecondaryGroup(
 
   let y = topY
   for (const p of items) {
-    y += drawSecondaryItem(ctx, p, size, leftX, rightX, y, palette.secondaryBg, pad, align, paraWidth, tagSecondary(env, p))
+    y += drawSecondaryItem(ctx, p, size, leftX, rightX, y, palette.secondaryBg, pad, align, paraWidth)
   }
 }
 
@@ -127,7 +126,6 @@ export function drawSplitLayout(env: RenderEnv): void {
     )
     ctx.restore()
   }
-  collectImage(env, imgRegion.x, imgRegion.y, imgRegion.w, imgRegion.h)
 
   // --- Text half: category badge anchored at the half's TOP-LEFT edge. ---
   const badgeTop = textY0
@@ -144,7 +142,6 @@ export function drawSplitLayout(env: RenderEnv): void {
         palette.highlight,
         pad,
         SECONDARY_TRACKING,
-        tagCategory(env),
       )
     : 0
 
@@ -164,7 +161,7 @@ export function drawSplitLayout(env: RenderEnv): void {
   const drawGroup = (items: Paragraph[], topY: number, align: HAlign) => {
     let y = topY
     for (const p of items) {
-      y += drawSecondaryItem(ctx, p, secSize, 0, w, y, palette.secondaryBg, pad, align, paraWidth, tagSecondary(env, p))
+      y += drawSecondaryItem(ctx, p, secSize, 0, w, y, palette.secondaryBg, pad, align, paraWidth)
     }
   }
   const topLeft = groupAt('top-left')
@@ -228,7 +225,7 @@ export function drawSplitLayout(env: RenderEnv): void {
 
   drawGroup(topLeft, topLeftTop, 'left')
   drawGroup(topRight, topRightTop, 'right')
-  drawHeaderBlock(ctx, block, headerTop, shortEdge, tagHeader(env))
+  drawHeaderBlock(ctx, block, headerTop, shortEdge)
   drawGroup(botLeft, botLeftTop, 'left')
   drawGroup(botRight, botRightTop, 'right')
 
