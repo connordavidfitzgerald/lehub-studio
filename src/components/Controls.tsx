@@ -185,7 +185,7 @@ function ParagraphList({
         // Rule between items so each text block reads as its own group.
         <div key={i} className={CARD}>
           <TextField label="" value={p.text} onChange={(v) => update(i, { text: v })} multiline />
-          <div className="flex flex-col gap-1   pb-2 mb-1 px-1">
+          <div className="flex flex-col gap-1   pb-1.5 mb-1 px-1">
           <Drawer label="Options">
             {mode === 'position' && (
               <>
@@ -486,7 +486,7 @@ export function Controls() {
           <div className={CARD}>
             <div className="flex flex-col w-full gap-1 pb-1">
               <TextField label="" value={s.header} onChange={(v) => set('header', v)} multiline />
-              <div className="flex flex-col w-full px-1 pb-1">
+              <div className="flex flex-col w-full px-1 pb-1.5">
             <Drawer label="Options">
               <IconChoice
                 label="Colour"
