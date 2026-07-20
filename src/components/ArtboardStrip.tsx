@@ -6,7 +6,7 @@ import { usePaperImages } from '../hooks/usePaperImages'
 import type { RenderAssets } from '../render/env'
 import { renderPoster } from '../render/renderPoster'
 import { usePoster, type Artboard } from '../store/usePoster'
-import { labelClass } from './ui'
+
 
 // Thumbnails render at 2× the displayed size for crispness on hi-dpi screens.
 const DISPLAY_H = 84
