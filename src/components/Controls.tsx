@@ -475,7 +475,7 @@ export function Controls() {
       <Section
           title="Heading"
           collapsible
-          defaultOpen
+
           action={
             <button onClick={() => set('header', '')} className={CLEAR_BTN}>
               Clear
@@ -540,7 +540,7 @@ export function Controls() {
 
         <Section
           title="Secondary Text"
-          defaultOpen
+
           collapsible
           action={
             <button onClick={() => set('paragraphs', [makeParagraph()])} className={CLEAR_BTN}>

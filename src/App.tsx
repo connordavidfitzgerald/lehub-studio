@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { ArtboardStrip } from './components/ArtboardStrip'
 import { Controls } from './components/Controls'
 import { PosterPreview } from './components/PosterPreview'
-import { labelClass } from './components/ui'
+
 import { usePlaceholderImages } from './hooks/usePlaceholderImages'
 import { DEFAULT_CATEGORY, sessionRestored, usePoster } from './store/usePoster'
 
