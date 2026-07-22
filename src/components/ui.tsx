@@ -304,13 +304,16 @@ export function BgIcon({ mode }: { mode: 'solid' | 'image' }) {
 /** Layout icon: a small glyph for each layout mode, matching the position-icon style. */
 export function LayoutIcon({
   layout,
+  textHalf = 'top',
 }: {
   layout: 'split' | 'centered' | 'editorial' | 'generate'
+  /** Split only: which half the text block fills, so the icon previews the swap. */
+  textHalf?: 'top' | 'bottom'
 }) {
   if (layout === 'split') {
     return (
       <IconFrame>
-        <rect x={1} y={1} width={22} height={8} fill="currentColor" />
+        <rect x={1} y={textHalf === 'bottom' ? 9 : 1} width={22} height={8} fill="currentColor" />
       </IconFrame>
     )
   }

@@ -342,8 +342,23 @@ export function Controls() {
   const pickLayout = (v: LayoutChoice) => {
     // No slide type passed — the Colour control owns it, so reseeding keeps it.
     if (v === 'generate') generateLayout()
+    // Split is already selected: clicking it again flips which half holds the
+    // text, swapping the text and the image.
+    else if (v === 'split' && isSplit) set('textHalf', s.textHalf === 'top' ? 'bottom' : 'top')
     else setLayout(v as LayoutId)
   }
+
+  // The Split icon previews which half the text fills, and says what a second
+  // click does once Split is the active layout.
+  const layoutOptions = LAYOUT_OPTIONS.map((o) =>
+    o.value === 'split'
+      ? {
+          ...o,
+          icon: <LayoutIcon layout="split" textHalf={s.textHalf} />,
+          title: isSplit ? 'Split — click again to swap text and image' : o.title,
+        }
+      : o,
+  )
 
   // Replay the seeded image draw so the position control is labelled for the axis
   // the generated band slides along. A full-bleed image has nowhere to move.
@@ -420,7 +435,7 @@ export function Controls() {
             )
           }
         >
-          <IconChoice cols={4} value={layoutValue} onChange={pickLayout} options={LAYOUT_OPTIONS} />
+          <IconChoice cols={4} value={layoutValue} onChange={pickLayout} options={layoutOptions} />
           {isGenerative && (
             <Drawer label="Options">
               <IconChoice
