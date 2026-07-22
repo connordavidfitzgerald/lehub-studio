@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { ArtboardStrip } from './components/ArtboardStrip'
 import { Controls } from './components/Controls'
 import { PosterPreview } from './components/PosterPreview'
+import { UndoRedo } from './components/UndoRedo'
 import { hydrateImages, usePoster } from './store/usePoster'
 
 function App() {
@@ -38,7 +39,10 @@ function App() {
   return (
     <div className="flex h-full w-full bg-white text-black">
       <aside className="flex w-[356px] shrink-0 flex-col gap-2 p-2 ">
-        <h1 className="text-xl px-2.5 py-1 font-review">Le HUB Poster Studio</h1>
+        <div className="flex items-center justify-between gap-2 pr-0.5">
+          <h1 className="text-xl px-2.5 py-1 font-review">Le HUB Poster Studio</h1>
+          <UndoRedo />
+        </div>
         <div className="min-h-0 flex-1">
           <Controls />
         </div>

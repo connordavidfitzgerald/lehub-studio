@@ -370,6 +370,39 @@ export function Controls() {
         <Segmented value={s.aspect} onChange={(v) => set('aspect', v)} options={ASPECT_OPTIONS} />
         </Section>
 
+      <Section title="Category" collapsible defaultOpen>
+        {!isEditorial && (
+          <TextField label="" value={s.category} onChange={(v) => set('category', v)} />
+        )}
+
+          <div className="grid grid-cols-2 gap-2 px-1">
+
+          {PALETTES.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => applyCategory(p.id, placeholders[p.id] ?? null)}
+              className={`flex items-center gap-1.5 border border-black px-2 py-[7px] text-left text-xs font-bold tracking-[-0.01em] transition ${
+                s.paletteId === p.id
+                  ? 'bg-black text-white'
+                  : 'bg-white text-black hover:bg-black/5'
+              }`}
+            >
+              <span
+                className="h-4 w-4 shrink-0 border"
+                style={{ background: p.background }}
+              />
+              <span
+                className="h-4 w-4 shrink-0 border"
+                style={{ background: p.highlight }}
+              />
+              <span className="text-xs">{p.label}</span>
+            </button>
+          ))}
+        </div>
+
+      </Section>
+
+
         <Section
           title="Layout"
           collapsible
@@ -461,39 +494,6 @@ export function Controls() {
             )}
           </Drawer>
         </Section>
-
-      <Section title="Category" collapsible defaultOpen>
-        {!isEditorial && (
-          <TextField label="" value={s.category} onChange={(v) => set('category', v)} />
-        )}
-
-          <div className="grid grid-cols-2 gap-2 px-1">
-
-          {PALETTES.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => applyCategory(p.id, placeholders[p.id] ?? null)}
-              className={`flex items-center gap-1.5 border border-black px-2 py-[7px] text-left text-xs font-bold tracking-[-0.01em] transition ${
-                s.paletteId === p.id
-                  ? 'bg-black text-white'
-                  : 'bg-white text-black hover:bg-black/5'
-              }`}
-            >
-              <span
-                className="h-4 w-4 shrink-0 border"
-                style={{ background: p.background }}
-              />
-              <span
-                className="h-4 w-4 shrink-0 border"
-                style={{ background: p.highlight }}
-              />
-              <span className="text-xs">{p.label}</span>
-            </button>
-          ))}
-        </div>
-
-      </Section>
-
 
 
       <Section
