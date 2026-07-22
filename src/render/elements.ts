@@ -87,6 +87,27 @@ export function drawHeaderBlock(
   })
 }
 
+/** Box a {@link drawBadge} call would occupy, without drawing it. */
+export function measureBadgeBox(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  font: BrandFont,
+  size: number,
+  padPx: number,
+  tracking = 0,
+): { w: number; h: number } {
+  setTracking(ctx, size * tracking)
+  ctx.font = fontString(font, size)
+  ctx.textBaseline = 'alphabetic'
+  const m = ctx.measureText(text)
+  const box = {
+    w: m.width + padPx * 2,
+    h: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent + padPx * 2,
+  }
+  setTracking(ctx, 0)
+  return box
+}
+
 /**
  * Draw a single line of text with a solid background fitted tightly to the
  * text's actual bounds (ascent + descent) plus `padPx` on all sides. Used for
@@ -351,19 +372,35 @@ export function measureFittedParagraphs(
   maxWidth: number,
   padPx: number,
 ): number {
+  return measureFittedParagraphsBox(ctx, paragraphs, size, maxWidth, padPx).h
+}
+
+/**
+ * As {@link measureFittedParagraphs}, but also returns the widest fitted badge —
+ * the block's true width, needed to place or hit-test the block as a box.
+ */
+export function measureFittedParagraphsBox(
+  ctx: CanvasRenderingContext2D,
+  paragraphs: Paragraph[],
+  size: number,
+  maxWidth: number,
+  padPx: number,
+): { w: number; h: number } {
   const lines = buildFittedLines(ctx, paragraphs, size, Math.max(1, maxWidth - padPx * 2))
   setTracking(ctx, size * SECONDARY_TRACKING)
   ctx.font = fontString(SECONDARY_FONT, size)
   ctx.textBaseline = 'alphabetic'
   const gap = size * SECONDARY_LINE_GAP
   let total = 0
+  let widest = 0
   lines.forEach((l, i) => {
     if (i > 0) total += gap
     const m = ctx.measureText(l.text)
     total += m.actualBoundingBoxAscent + m.actualBoundingBoxDescent + padPx * 2
+    widest = Math.max(widest, m.width + padPx * 2)
   })
   setTracking(ctx, 0)
-  return total
+  return { w: widest, h: total }
 }
 
 /**
@@ -413,10 +450,26 @@ export function measureSecondaryItem(
   paraWidth: number,
   padPx: number,
 ): number {
-  if (!p.text.trim()) return 0
-  return p.style === 'paragraph'
-    ? measureParagraph(ctx, p.text, size, paraWidth, padPx).height
-    : measureFittedParagraphs(ctx, [p], size, fittedWidth, padPx)
+  return measureSecondaryItemBox(ctx, p, size, fittedWidth, paraWidth, padPx).h
+}
+
+/**
+ * As {@link measureSecondaryItem}, but also returns the element's width: the
+ * fixed container width for paragraph style, the widest badge for fitted style.
+ */
+export function measureSecondaryItemBox(
+  ctx: CanvasRenderingContext2D,
+  p: Paragraph,
+  size: number,
+  fittedWidth: number,
+  paraWidth: number,
+  padPx: number,
+): { w: number; h: number } {
+  if (!p.text.trim()) return { w: 0, h: 0 }
+  if (p.style === 'paragraph') {
+    return { w: paraWidth, h: measureParagraph(ctx, p.text, size, paraWidth, padPx).height }
+  }
+  return measureFittedParagraphsBox(ctx, [p], size, fittedWidth, padPx)
 }
 
 /**

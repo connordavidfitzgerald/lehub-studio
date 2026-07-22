@@ -15,6 +15,36 @@ import { drawPaper } from './paper'
 import { getPaper } from '../config/papers'
 
 /**
+ * Assemble the environment a layout draws into. Exported so callers that only
+ * need the geometry (the preview's drag hit-testing) can plan a layout with the
+ * exact same inputs the renderer uses, without drawing anything.
+ */
+export function buildRenderEnv(
+  ctx: CanvasRenderingContext2D,
+  state: PosterState,
+  w: number,
+  h: number,
+  assets: RenderAssets,
+  renderScale = 1,
+): RenderEnv {
+  const shortEdge = Math.min(w, h)
+  return {
+    ctx,
+    state,
+    palette: getPalette(state.paletteId),
+    g: grid(w, h),
+    w,
+    h,
+    shortEdge,
+    secondarySize: shortEdge * SECONDARY_SIZE_RATIO,
+    categorySize: shortEdge * CATEGORY_SIZE_RATIO,
+    logoHeight: shortEdge * LOGO_HEIGHT_RATIO,
+    assets,
+    renderScale,
+  }
+}
+
+/**
  * Draw one complete poster into `ctx` at `w`×`h`. Pure given its inputs, so the
  * live preview and the export share exactly the same code path.
  */
@@ -26,29 +56,13 @@ export function renderPoster(
   assets: RenderAssets,
   renderScale = 1,
 ): void {
-  const palette = getPalette(state.paletteId)
-  const shortEdge = Math.min(w, h)
+  const env = buildRenderEnv(ctx, state, w, h, assets, renderScale)
 
   // 1. Background
   ctx.save()
-  ctx.fillStyle = palette.background
+  ctx.fillStyle = env.palette.background
   ctx.fillRect(0, 0, w, h)
   ctx.restore()
-
-  const env: RenderEnv = {
-    ctx,
-    state,
-    palette,
-    g: grid(w, h),
-    w,
-    h,
-    shortEdge,
-    secondarySize: shortEdge * SECONDARY_SIZE_RATIO,
-    categorySize: shortEdge * CATEGORY_SIZE_RATIO,
-    logoHeight: shortEdge * LOGO_HEIGHT_RATIO,
-    assets,
-    renderScale,
-  }
 
   // 2. Layout content (halftone image + text + logo)
   if (state.layout === 'split') drawSplitLayout(env)

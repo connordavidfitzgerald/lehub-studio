@@ -1,28 +1,39 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { ArtboardStrip } from './components/ArtboardStrip'
 import { Controls } from './components/Controls'
 import { PosterPreview } from './components/PosterPreview'
-
-import { usePlaceholderImages } from './hooks/usePlaceholderImages'
-import { DEFAULT_CATEGORY, sessionRestored, usePoster } from './store/usePoster'
+import { hydrateImages, usePoster } from './store/usePoster'
 
 function App() {
-  // Load the default category's placeholder image onto the initial artboard once
-  // it's ready (only while that artboard is still the untouched default). Skipped
-  // for a restored session: its artboards are the user's, not a fresh default.
-  const placeholders = usePlaceholderImages()
-  const inited = useRef(sessionRestored)
+  // Poster state can't carry the image element across a reload, only a reference
+  // to it, so any artboard that has a reference but no image gets it (re)loaded —
+  // on first paint, after a refresh, and whenever a category swaps the image in.
+  const artboards = usePoster((st) => st.artboards)
   useEffect(() => {
-    if (inited.current) return
-    const img = placeholders[DEFAULT_CATEGORY]
-    if (!img) return
-    inited.current = true
-    const st = usePoster.getState()
-    const cur = st.artboards.find((a) => a.id === st.currentId)
-    if (cur && cur.state.image === null && cur.state.categoryId === DEFAULT_CATEGORY) {
-      st.setImage(img)
+    void hydrateImages()
+  }, [artboards])
+
+  // Cmd/Ctrl+Z to undo, Shift+Cmd/Ctrl+Z (or Ctrl+Y) to redo. Text fields keep
+  // their own native undo — retyping a headline shouldn't cost a layout change.
+  useEffect(() => {
+    const isTextField = (el: EventTarget | null) =>
+      el instanceof HTMLElement &&
+      (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+      const key = e.key.toLowerCase()
+      const redo = key === 'y' || (key === 'z' && e.shiftKey)
+      if (key !== 'z' && !redo) return
+      if (isTextField(e.target)) return
+      e.preventDefault()
+      const st = usePoster.getState()
+      if (redo) st.redo()
+      else st.undo()
     }
-  }, [placeholders])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="flex h-full w-full bg-white text-black">

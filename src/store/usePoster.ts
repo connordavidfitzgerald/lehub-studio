@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type {
   AspectId,
+  GenElementKey,
+  GenSlot,
   HalftoneParams,
   HeaderWidthMode,
   LayoutId,
@@ -9,6 +11,7 @@ import type {
   SlideType,
 } from '../types'
 import { DEFAULT_HALFTONE } from '../config/constants'
+import { loadImageRef, pruneImageBlobs, type ImageRef } from './imageStore'
 import { PAPERS } from '../config/papers'
 import { CATEGORY_PRESETS } from '../config/categoryPresets'
 import {
@@ -53,7 +56,98 @@ function categoryFields(id: string, image: HTMLImageElement | null) {
     header: preset.header,
     paragraphs,
     image,
+    // The placeholder is a bundled asset, so its URL is all we need to get it back
+    // after a reload — even if the element itself hasn't finished loading yet.
+    imageRef: preset.image ? ({ kind: 'url', src: preset.image } as ImageRef) : null,
   }
+}
+
+// --- Generative slot plumbing. A pin lives with the thing it moves: header,
+//     category and logo on the poster state, secondaries on their paragraph. ---
+
+const SLOT_FIELD = {
+  header: 'genHeaderSlot',
+  category: 'genCategorySlot',
+  logo: 'genLogoSlot',
+} as const
+
+/** Every element that can currently hold a pin, in a stable order. */
+function slotKeys(s: PosterState): GenElementKey[] {
+  return [
+    'header',
+    'category',
+    'logo',
+    ...s.paragraphs.map((_, i): GenElementKey => `p${i}`),
+  ]
+}
+
+function readSlot(s: PosterState, key: GenElementKey): GenSlot | null {
+  if (key === 'image') return null
+  if (key in SLOT_FIELD) return s[SLOT_FIELD[key as keyof typeof SLOT_FIELD]] ?? null
+  const i = Number(key.slice(1))
+  return s.paragraphs[i]?.genSlot ?? null
+}
+
+function writeSlot(s: PosterState, key: GenElementKey, slot: GenSlot | null): PosterState {
+  if (key === 'image') return s
+  if (key in SLOT_FIELD) return { ...s, [SLOT_FIELD[key as keyof typeof SLOT_FIELD]]: slot }
+  const i = Number(key.slice(1))
+  if (!s.paragraphs[i]) return s
+  return {
+    ...s,
+    paragraphs: s.paragraphs.map((p, idx) => (idx === i ? { ...p, genSlot: slot } : p)),
+  }
+}
+
+const sameCell = (a: GenSlot | null, b: GenSlot) =>
+  !!a && a.region === b.region && a.v === b.v && a.h === b.h
+
+/**
+ * Drop every manual adjustment — pins and the dragged image size — returning the
+ * poster to its purely seeded composition.
+ */
+function clearSlots(s: PosterState): PosterState {
+  return {
+    ...s,
+    genImageSize: null,
+    genHeaderCols: null,
+    genHeaderSlot: null,
+    genCategorySlot: null,
+    genLogoSlot: null,
+    paragraphs: s.paragraphs.map((p) => (p.genSlot ? { ...p, genSlot: null } : p)),
+  }
+}
+
+/**
+ * Pin `key` to `slot` (or release it with `null`), renumbering the target cell so
+ * `order` stays a dense 0..n-1 sequence with the dropped element at the requested
+ * index. Pure, so the drag preview can plan against the exact state a drop would
+ * produce instead of guessing where the element will land.
+ */
+export function applyGenSlot(
+  s: PosterState,
+  key: GenElementKey,
+  slot: GenSlot | null,
+): PosterState {
+  const next = writeSlot(s, key, slot)
+  if (!slot) return next
+  const others = slotKeys(next)
+    .filter((k) => k !== key && sameCell(readSlot(next, k), slot))
+    .sort((a, b) => readSlot(next, a)!.order - readSlot(next, b)!.order)
+  others.splice(Math.max(0, Math.min(slot.order, others.length)), 0, key)
+  return others.reduce((acc, k, i) => writeSlot(acc, k, { ...readSlot(acc, k)!, order: i }), next)
+}
+
+/** True when anything on this poster has been dragged out of the seeded flow. */
+export function hasGenSlots(s: PosterState): boolean {
+  return (
+    s.genImageSize != null ||
+    s.genHeaderCols != null ||
+    !!s.genHeaderSlot ||
+    !!s.genCategorySlot ||
+    !!s.genLogoSlot ||
+    s.paragraphs.some((p) => p.genSlot)
+  )
 }
 
 /** One editable poster. Each artboard owns an independent `PosterState`. */
@@ -62,18 +156,73 @@ export interface Artboard {
   state: PosterState
 }
 
+// --- Undo/redo. Every action rebuilds state instead of mutating it, so a history
+//     entry is just a reference to the previous artboards array — snapshots cost
+//     nothing to take and share all their untouched structure. ---
+
+/** How much of the store undo restores: the posters and which one was open. */
+export interface Snapshot {
+  artboards: Artboard[]
+  currentId: string
+}
+
+const HISTORY_LIMIT = 50
+
+/**
+ * Runs of the same action within this window collapse into one undo step, so a
+ * typed headline or a dragged slider undoes as a single edit rather than
+ * per keystroke / per pixel.
+ */
+const COALESCE_MS = 500
+
+/**
+ * What kind of edit is being made, set by each action just before it runs. Two
+ * consecutive edits sharing a tag (within {@link COALESCE_MS}) are one undo step.
+ * `null` means "don't record this at all" — used for changes the user didn't
+ * make, like an image finishing loading.
+ */
+let pendingTag: string | null = null
+const tag = (t: string | null) => {
+  pendingTag = t
+}
+let lastTag: string | null = null
+let lastAt = 0
+/** Set while undo/redo is applying, so restoring a snapshot isn't itself recorded. */
+let applyingHistory = false
+
+/** Run an action, labelling whatever it changes for the history recorder. */
+function tagged<T>(t: string | null, run: () => T): T {
+  tag(t)
+  return run()
+}
+
 interface PosterStore {
   artboards: Artboard[]
   currentId: string
   /** Saved style presets (localStorage-backed). */
   presets: Preset[]
+  /** Snapshots behind and ahead of the current state (undo / redo stacks). */
+  past: Snapshot[]
+  future: Snapshot[]
+
+  /** Step back to the state before the last edit. */
+  undo: () => void
+  /** Step forward again after an undo. */
+  redo: () => void
 
   set: <K extends keyof PosterState>(key: K, value: PosterState[K]) => void
   setHalftone: <K extends keyof HalftoneParams>(
     key: K,
     value: HalftoneParams[K],
   ) => void
-  setImage: (img: HTMLImageElement | null) => void
+  /** Set the current artboard's image, along with how to restore it on reload. */
+  setImage: (img: HTMLImageElement | null, ref?: ImageRef | null) => void
+  /** Attach a loaded image to one artboard, leaving its stored reference alone. */
+  setArtboardImage: (artboardId: string, img: HTMLImageElement) => void
+  /** Generative layout: pin (or unpin, with `null`) one element to a slot. */
+  setGenSlot: (key: GenElementKey, slot: GenSlot | null) => void
+  /** Generative layout: release every manually dragged element back to the seed. */
+  clearGenSlots: () => void
   /** Select a category and apply its placeholder content (text + image + layout). */
   applyCategory: (id: string, image: HTMLImageElement | null) => void
   setPaperOpacity: (id: string, value: number) => void
@@ -123,6 +272,11 @@ function createDefaultState(): PosterState {
     genAlign: 'auto',
     genHeaderWidth: 'auto',
     genImageAlign: 'auto',
+    genImageSize: null,
+    genHeaderCols: null,
+    genHeaderSlot: null,
+    genCategorySlot: null,
+    genLogoSlot: null,
 
     halftone: { ...DEFAULT_HALFTONE },
   }
@@ -169,49 +323,120 @@ export const usePoster = create<PosterStore>((set) => ({
   artboards: initial.artboards,
   currentId: initial.currentId,
   presets: loadPresets(),
+  past: [],
+  future: [],
 
-  set: (key, value) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => ({ ...s, [key]: value })),
-    })),
-
-  setHalftone: (key, value) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => ({
-        ...s,
-        halftone: { ...s.halftone, [key]: value },
-      })),
-    })),
-
-  setImage: (img) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => ({ ...s, image: img })),
-    })),
-
-  applyCategory: (id, image) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => {
-        const preset = CATEGORY_PRESETS[id]
-        if (!preset) return { ...s, paletteId: id, categoryId: id }
-        return { ...s, ...categoryFields(id, image), layout: preset.layout ?? s.layout }
-      }),
-    })),
-
-  setPaperOpacity: (id, value) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => ({
-        ...s,
-        paperOpacities: { ...s.paperOpacities, [id]: value },
-      })),
-    })),
-
-  addArtboard: () =>
+  undo: () =>
     set((store) => {
-      const board: Artboard = { id: uid(), state: createDefaultState() }
-      return { artboards: [...store.artboards, board], currentId: board.id }
+      const prev = store.past.at(-1)
+      if (!prev) return {}
+      applyingHistory = true
+      // Any run being coalesced ends here, so the next edit starts a fresh step.
+      lastTag = null
+      return {
+        past: store.past.slice(0, -1),
+        future: [...store.future, { artboards: store.artboards, currentId: store.currentId }],
+        artboards: prev.artboards,
+        currentId: prev.currentId,
+      }
     }),
 
+  redo: () =>
+    set((store) => {
+      const next = store.future.at(-1)
+      if (!next) return {}
+      applyingHistory = true
+      lastTag = null
+      return {
+        future: store.future.slice(0, -1),
+        past: [...store.past, { artboards: store.artboards, currentId: store.currentId }],
+        artboards: next.artboards,
+        currentId: next.currentId,
+      }
+    }),
+
+  set: (key, value) =>
+    // Edits to the same field in quick succession (typing, dragging a slider)
+    // collapse into one undo step.
+    tagged(`set:${String(key)}`, () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => ({ ...s, [key]: value })),
+      })),
+    ),
+
+  setHalftone: (key, value) =>
+    tagged(`halftone:${String(key)}`, () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => ({
+          ...s,
+          halftone: { ...s.halftone, [key]: value },
+        })),
+      })),
+    ),
+
+  setImage: (img, ref = null) =>
+    tagged('image', () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => ({ ...s, image: img, imageRef: ref })),
+      })),
+    ),
+
+  // Not an edit: an image the user already chose finished loading. Recording it
+  // would make Cmd+Z "undo" the image appearing after a refresh.
+  setArtboardImage: (artboardId, img) =>
+    tagged(null, () =>
+      set((store) => ({
+        artboards: store.artboards.map((a) =>
+          a.id === artboardId ? { ...a, state: { ...a.state, image: img } } : a,
+        ),
+      })),
+    ),
+
+  setGenSlot: (key, slot) =>
+    tagged(`genSlot:${key}`, () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => applyGenSlot(s, key, slot)),
+      })),
+    ),
+
+  clearGenSlots: () =>
+    tagged('clearGenSlots', () =>
+      set((store) => ({
+        artboards: mapCurrent(store, clearSlots),
+      })),
+    ),
+
+  applyCategory: (id, image) =>
+    tagged('applyCategory', () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => {
+          const preset = CATEGORY_PRESETS[id]
+          if (!preset) return { ...s, paletteId: id, categoryId: id }
+          return { ...s, ...categoryFields(id, image), layout: preset.layout ?? s.layout }
+        }),
+      })),
+    ),
+
+  setPaperOpacity: (id, value) =>
+    tagged(`paper:${id}`, () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => ({
+          ...s,
+          paperOpacities: { ...s.paperOpacities, [id]: value },
+        })),
+      })),
+    ),
+
+  addArtboard: () =>
+    tagged('addArtboard', () =>
+      set((store) => {
+        const board: Artboard = { id: uid(), state: createDefaultState() }
+        return { artboards: [...store.artboards, board], currentId: board.id }
+      }),
+    ),
+
   duplicateArtboard: (id) =>
+    tagged('duplicateArtboard', () =>
     set((store) => {
       const src = store.artboards.find((a) => a.id === id)
       if (!src) return {}
@@ -231,48 +456,61 @@ export const usePoster = create<PosterStore>((set) => ({
       artboards.splice(idx + 1, 0, board)
       return { artboards, currentId: board.id }
     }),
+    ),
 
   removeArtboard: (id) =>
-    set((store) => {
-      if (store.artboards.length <= 1) return {} // never delete the last one
-      const idx = store.artboards.findIndex((a) => a.id === id)
-      const artboards = store.artboards.filter((a) => a.id !== id)
-      let currentId = store.currentId
-      if (currentId === id) {
-        const next = artboards[Math.min(idx, artboards.length - 1)]
-        currentId = next.id
-      }
-      return { artboards, currentId }
-    }),
+    tagged('removeArtboard', () =>
+      set((store) => {
+        if (store.artboards.length <= 1) return {} // never delete the last one
+        const idx = store.artboards.findIndex((a) => a.id === id)
+        const artboards = store.artboards.filter((a) => a.id !== id)
+        let currentId = store.currentId
+        if (currentId === id) {
+          const next = artboards[Math.min(idx, artboards.length - 1)]
+          currentId = next.id
+        }
+        return { artboards, currentId }
+      }),
+    ),
 
-  selectArtboard: (id) => set({ currentId: id }),
+  // Switching artboards isn't an edit, so it doesn't get its own undo step — but
+  // snapshots carry the selection, so undoing an edit returns to the board it
+  // happened on.
+  selectArtboard: (id) => tagged(null, () => set({ currentId: id })),
 
   reorderArtboard: (fromId, toId) =>
-    set((store) => {
-      if (fromId === toId) return {}
-      const from = store.artboards.findIndex((a) => a.id === fromId)
-      const to = store.artboards.findIndex((a) => a.id === toId)
-      if (from < 0 || to < 0) return {}
-      const artboards = [...store.artboards]
-      const [moved] = artboards.splice(from, 1)
-      artboards.splice(to, 0, moved)
-      return { artboards }
-    }),
+    tagged('reorderArtboard', () =>
+      set((store) => {
+        if (fromId === toId) return {}
+        const from = store.artboards.findIndex((a) => a.id === fromId)
+        const to = store.artboards.findIndex((a) => a.id === toId)
+        if (from < 0 || to < 0) return {}
+        const artboards = [...store.artboards]
+        const [moved] = artboards.splice(from, 1)
+        artboards.splice(to, 0, moved)
+        return { artboards }
+      }),
+    ),
 
   setLayout: (layout) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => ({ ...s, layout })),
-    })),
+    tagged('setLayout', () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => ({ ...s, layout })),
+      })),
+    ),
 
   generateLayout: (slideType) =>
-    set((store) => ({
-      artboards: mapCurrent(store, (s) => ({
-        ...s,
-        layout: 'generative',
-        slideType: slideType ?? s.slideType,
-        seed: (Math.random() * 2 ** 31) >>> 0,
+    tagged('generateLayout', () =>
+      set((store) => ({
+        // A new seed is a new composition, so pins from the old one are dropped.
+        artboards: mapCurrent(store, (s) => ({
+          ...clearSlots(s),
+          layout: 'generative',
+          slideType: slideType ?? s.slideType,
+          seed: (Math.random() * 2 ** 31) >>> 0,
+        })),
       })),
-    })),
+    ),
 
   savePreset: (name) =>
     set((store) => {
@@ -291,6 +529,7 @@ export const usePoster = create<PosterStore>((set) => ({
     }),
 
   applyPreset: (id) =>
+    tagged('applyPreset', () =>
     set((store) => {
       const preset = store.presets.find((p) => p.id === id)
       if (!preset) return {}
@@ -305,6 +544,7 @@ export const usePoster = create<PosterStore>((set) => ({
         })),
       }
     }),
+    ),
 
   deletePreset: (id) =>
     set((store) => {
@@ -317,6 +557,36 @@ export const usePoster = create<PosterStore>((set) => ({
 // Persist the artboards on change, debounced so slider drags and typing don't
 // thrash localStorage. Images are dropped by saveSession — they can't be stored.
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+// Record history from the *previous* state, so an entry is exactly "what it
+// looked like before this edit". Runs of the same tagged action inside the
+// coalesce window extend the current step instead of adding another one.
+usePoster.subscribe((store, prev) => {
+  if (store.artboards === prev.artboards) {
+    pendingTag = null
+    return // selection-only changes aren't edits
+  }
+  if (applyingHistory) {
+    applyingHistory = false
+    pendingTag = null
+    return
+  }
+  const t = pendingTag
+  pendingTag = null
+  if (t === null) return // not a user edit (e.g. an image finished loading)
+
+  const now = Date.now()
+  const coalesce = t === lastTag && now - lastAt < COALESCE_MS && store.past.length > 0
+  lastTag = t
+  lastAt = now
+  if (coalesce) return // the step already covers this run
+
+  const past = [...store.past, { artboards: prev.artboards, currentId: prev.currentId }]
+  usePoster.setState({
+    past: past.length > HISTORY_LIMIT ? past.slice(past.length - HISTORY_LIMIT) : past,
+    future: [], // a fresh edit invalidates anything that was undone
+  })
+})
+
 usePoster.subscribe((store, prev) => {
   if (store.artboards === prev.artboards && store.currentId === prev.currentId) return
   clearTimeout(saveTimer)
@@ -325,6 +595,47 @@ usePoster.subscribe((store, prev) => {
     400,
   )
 })
+
+// Images can't be serialized, so a restored session comes back with `imageRef`
+// set but `image` empty. Loading is async and idempotent: each reference is
+// fetched at most once, and stored uploads no artboard points at are dropped.
+const loading = new Set<string>()
+const refKey = (ref: ImageRef) => (ref.kind === 'url' ? `url:${ref.src}` : `blob:${ref.id}`)
+
+let pruned = false
+
+/** Reload the images every artboard references but hasn't got in memory. */
+export async function hydrateImages(): Promise<void> {
+  const { artboards } = usePoster.getState()
+  const missing = artboards.filter((a) => a.state.imageRef && !a.state.image)
+  // Called on every state change, so do nothing (and touch no storage) unless
+  // there is an image to load or stale uploads still to sweep up.
+  if (!missing.length && pruned) return
+  await Promise.all(
+    missing.map(async ({ id, state }) => {
+      const ref = state.imageRef
+      if (!ref || state.image) return
+      const key = `${id}|${refKey(ref)}`
+      if (loading.has(key)) return
+      loading.add(key)
+      const img = await loadImageRef(ref)
+      loading.delete(key)
+      // The artboard may have been deleted or re-imaged while we were loading.
+      const current = usePoster.getState().artboards.find((a) => a.id === id)
+      if (img && current && !current.state.image && current.state.imageRef === ref) {
+        usePoster.getState().setArtboardImage(id, img)
+      }
+    }),
+  )
+  pruned = true
+  await pruneImageBlobs(
+    usePoster
+      .getState()
+      .artboards.map((a) => a.state.imageRef)
+      .filter((r): r is ImageRef => !!r && r.kind === 'blob')
+      .map((r) => (r as { id: string }).id),
+  )
+}
 
 /** The current artboard's poster state (re-renders when it changes). */
 export function useCurrentState(): PosterState {

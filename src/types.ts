@@ -1,3 +1,5 @@
+import type { ImageRef } from './store/imageStore'
+
 export type AspectId = '4x5' | '9x16' | '5x7'
 
 export interface Aspect {
@@ -66,9 +68,27 @@ export type GenHeaderWidth = 'auto' | 'narrow' | 'wide' | 'full'
  * Generative image band position. Moves the image region within the poster; the
  * text zone reflows into the space left over. Axis-neutral because the seeded band
  * decides the axis — `start` reads as top for a band across the poster and as left
- * for one down a side. `auto` keeps the seeded position.
+ * for one down a side. `auto` keeps the seeded position. The band always hugs an
+ * edge: a centred band would strand a dead half of the canvas behind it.
  */
-export type GenImageAlign = 'auto' | 'start' | 'middle' | 'end'
+export type GenImageAlign = 'auto' | 'start' | 'end'
+
+/**
+ * Generative layout: a manually pinned position. Elements snap to a 3×3 anchor
+ * grid inside a region — the text zone, or the image region when an image is
+ * present. Several elements can share a cell; `order` stacks them within it.
+ */
+export type GenSlotRegion = 'text' | 'image'
+export type GenSlotV = 'top' | 'middle' | 'bottom'
+export type GenSlotH = 'left' | 'center' | 'right'
+export interface GenSlot {
+  region: GenSlotRegion
+  v: GenSlotV
+  h: GenSlotH
+  order: number
+}
+/** Identifies one draggable generative element; secondaries by paragraph index. */
+export type GenElementKey = 'image' | 'category' | 'header' | 'logo' | `p${number}`
 
 /** Editorial layout: how a paragraph container aligns horizontally. */
 export type ContainerSide = 'left' | 'center' | 'right'
@@ -91,6 +111,8 @@ export interface Paragraph {
   half: HalfPosition
   position: SecondaryPos
   style: SecondaryStyle
+  /** Generative layout: pinned position from dragging it on the canvas. */
+  genSlot?: GenSlot | null
 }
 
 export interface PosterState {
@@ -130,9 +152,30 @@ export interface PosterState {
   genAlign: GenAlign
   /** Generative layout: header column span (auto = procedural). */
   genHeaderWidth: GenHeaderWidth
+  /**
+   * Generative layout: explicit header span in grid columns, from dragging the
+   * header's free edge. Overrides `genHeaderWidth`; `null`/absent defers to it.
+   */
+  genHeaderCols?: number | null
   /** Generative layout: where the image band sits (`auto` = seeded position). */
   genImageAlign: GenImageAlign
+  /**
+   * Generative layout: image band size in grid units (tenths of the axis it
+   * spans), from dragging its inner edge. `null`/absent keeps the seeded size.
+   * Sized past the point where the text would be squeezed below its minimum, the
+   * image fills the canvas and the text sits over it.
+   */
+  genImageSize?: number | null
+  /** Generative layout: pinned positions from dragging elements on the canvas. */
+  genHeaderSlot?: GenSlot | null
+  genCategorySlot?: GenSlot | null
+  genLogoSlot?: GenSlot | null
 
   image: HTMLImageElement | null
+  /**
+   * Where `image` came from, so it can be restored after a reload — the element
+   * itself has no JSON form. See `store/imageStore.ts`.
+   */
+  imageRef?: ImageRef | null
   halftone: HalftoneParams
 }

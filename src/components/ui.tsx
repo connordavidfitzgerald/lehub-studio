@@ -232,24 +232,23 @@ export function HalfIcon({ half }: { half: 'top' | 'bottom' }) {
 
 /**
  * Image-position icon: the image band drawn where it will sit — across the poster
- * at top / middle / bottom, or down a side at left / middle / right. The empty
+ * at the top or bottom, or down a side at the left or right. The empty
  * part of the frame is where the text reflows to.
  */
 export function ImageAlignIcon({
   align,
   axis,
 }: {
-  align: 'start' | 'middle' | 'end'
+  align: 'start' | 'end'
   axis: 'vertical' | 'horizontal'
 }) {
-  const at = (start: number, mid: number, end: number) =>
-    align === 'start' ? start : align === 'end' ? end : mid
+  const at = (start: number, end: number) => (align === 'start' ? start : end)
   return (
     <IconFrame>
       {axis === 'vertical' ? (
-        <rect x={1} y={at(1, 6, 11)} width={22} height={6} fill="currentColor" />
+        <rect x={1} y={at(1, 11)} width={22} height={6} fill="currentColor" />
       ) : (
-        <rect x={at(1, 8, 15)} y={1} width={8} height={16} fill="currentColor" />
+        <rect x={at(1, 15)} y={1} width={8} height={16} fill="currentColor" />
       )}
     </IconFrame>
   )

@@ -13,7 +13,8 @@ import { exportPoster, type ExportFormat } from '../render/export'
 import { useImage } from '../hooks/useImage'
 import { usePaperImages } from '../hooks/usePaperImages'
 import { usePlaceholderImages } from '../hooks/usePlaceholderImages'
-import { makeParagraph, usePoster, useCurrentState } from '../store/usePoster'
+import { hasGenSlots, makeParagraph, usePoster, useCurrentState } from '../store/usePoster'
+import { putImageBlob } from '../store/imageStore'
 import {
   imageAlignAxis,
   mulberry32,
@@ -137,8 +138,8 @@ const STYLE_OPTIONS = [
   { value: 'paragraph' as const, label: 'Paragraph' },
 ]
 
-// Where the image band sits; the text reflows into what's left. The seeded band
-// decides the axis, so the labels follow it: a band across the poster moves
+// Which edge the image band hugs; the text reflows into what's left. The seeded
+// band decides the axis, so the labels follow it: a band across the poster moves
 // top/bottom, one down a side moves left/right. `auto` keeps the seeded position.
 const imageAlignOptions = (
   axis: 'vertical' | 'horizontal',
@@ -147,7 +148,6 @@ const imageAlignOptions = (
   return [
     { value: 'auto', icon: <span className="text-xs font-bold">Auto</span>, title: 'Auto' },
     { value: 'start', icon: <ImageAlignIcon align="start" axis={axis} />, title: start },
-    { value: 'middle', icon: <ImageAlignIcon align="middle" axis={axis} />, title: 'Middle' },
     { value: 'end', icon: <ImageAlignIcon align="end" axis={axis} />, title: end },
   ]
 }
@@ -246,6 +246,7 @@ export function Controls() {
 
   const setLayout = usePoster((st) => st.setLayout)
   const generateLayout = usePoster((st) => st.generateLayout)
+  const clearGenSlots = usePoster((st) => st.clearGenSlots)
 
   const presets = usePoster((st) => st.presets)
   const savePreset = usePoster((st) => st.savePreset)
@@ -255,15 +256,18 @@ export function Controls() {
   const logo = useImage(LOGO.src)
   const papers = usePaperImages()
   const placeholders = usePlaceholderImages()
-  const [fmt, setFmt] = useState<ExportFormat>('png')
-  const [scale, setScale] = useState(2)
+  const [fmt, setFmt] = useState<ExportFormat>('jpg')
+  const [scale, setScale] = useState(1)
 
-  // Shared by the file picker and the drop target.
+  // Shared by the file picker and the drop target. The file is also stashed in
+  // IndexedDB so the poster still has its image after a reload.
   const loadFile = (file: File | undefined) => {
     if (!file || !file.type.startsWith('image/')) return
     const url = URL.createObjectURL(file)
     const img = new Image()
-    img.onload = () => setImage(img)
+    img.onload = () => {
+      void putImageBlob(file).then((ref) => setImage(img, ref))
+    }
     img.src = url
   }
 
@@ -366,7 +370,23 @@ export function Controls() {
         <Segmented value={s.aspect} onChange={(v) => set('aspect', v)} options={ASPECT_OPTIONS} />
         </Section>
 
-        <Section title="Layout" collapsible defaultOpen>
+        <Section
+          title="Layout"
+          collapsible
+          defaultOpen
+          action={
+            isGenerative &&
+            hasGenSlots(s) && (
+              <button
+                onClick={clearGenSlots}
+                title="Return dragged elements and the image size to the generated layout"
+                className={CLEAR_BTN}
+              >
+                Reset positions
+              </button>
+            )
+          }
+        >
           <IconChoice cols={4} value={layoutValue} onChange={pickLayout} options={LAYOUT_OPTIONS} />
           {isGenerative && (
             <Drawer label="Options">
@@ -381,13 +401,17 @@ export function Controls() {
                 label="Header Size"
                 cols={4}
                 value={s.genHeaderWidth}
-                onChange={(v) => set('genHeaderWidth', v)}
+                // Picking a width here takes back over from a dragged header edge.
+                onChange={(v) => {
+                  set('genHeaderWidth', v)
+                  if (s.genHeaderCols != null) set('genHeaderCols', null)
+                }}
                 options={GEN_SIZE_OPTIONS}
               />
               {s.image && canMoveImage && (
                 <IconChoice
                   label="Image"
-                  cols={4}
+                  cols={3}
                   value={s.genImageAlign}
                   onChange={(v) => set('genImageAlign', v)}
                   options={imageAlignOptions(imageAxis)}
@@ -556,7 +580,17 @@ export function Controls() {
           />
         </Section>
 
-        <Section title={hasBgMode ? 'Background' : 'Image & Halftone'} collapsible>
+        <Section
+          title={hasBgMode ? 'Background' : 'Image & Halftone'}
+          collapsible
+          action={
+            s.image && (
+              <button onClick={() => setImage(null)} className={CLEAR_BTN}>
+                Clear
+              </button>
+            )
+          }
+        >
           {hasBgMode && (
             <IconChoice
 
