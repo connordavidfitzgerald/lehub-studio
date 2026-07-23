@@ -421,14 +421,17 @@ export function Controls() {
           collapsible
           defaultOpen
           action={
-            isGenerative &&
             hasGenSlots(s) && (
               <button
                 onClick={clearGenSlots}
-                title="Return dragged elements and the image size to the generated layout"
+                title={
+                  isGenerative
+                    ? 'Return dragged elements and the image size to the generated layout'
+                    : 'Return dragged elements and any resizing to the original layout'
+                }
                 className={CLEAR_BTN}
               >
-                Reset positions
+                Reset
               </button>
             )
           }
