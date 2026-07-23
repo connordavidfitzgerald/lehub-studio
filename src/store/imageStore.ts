@@ -70,10 +70,17 @@ export async function pruneImageBlobs(keep: Iterable<string>): Promise<void> {
   )
 }
 
+// Bundled assets (the category placeholders) are referenced by URL and get
+// re-requested every time a category is applied. The bytes come from the HTTP
+// cache, but the decode doesn't — so hold on to the decoded elements.
+const byUrl = new Map<string, HTMLImageElement>()
+
 /** Load an image element for a reference, or null if it can no longer be found. */
 export async function loadImageRef(ref: ImageRef): Promise<HTMLImageElement | null> {
   let src: string
   if (ref.kind === 'url') {
+    const cached = byUrl.get(ref.src)
+    if (cached) return cached
     src = ref.src
   } else {
     const blob = await tx('readonly', (s) => s.get(ref.id) as IDBRequest<Blob | undefined>)
@@ -83,7 +90,10 @@ export async function loadImageRef(ref: ImageRef): Promise<HTMLImageElement | nu
   return new Promise((resolve) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
+    img.onload = () => {
+      if (ref.kind === 'url') byUrl.set(ref.src, img)
+      resolve(img)
+    }
     img.onerror = () => resolve(null)
     img.src = src
   })

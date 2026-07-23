@@ -12,7 +12,6 @@ import { getPaper } from '../config/papers'
 import { exportPoster, type ExportFormat } from '../render/export'
 import { useImage } from '../hooks/useImage'
 import { usePaperImages } from '../hooks/usePaperImages'
-import { usePlaceholderImages } from '../hooks/usePlaceholderImages'
 import { hasGenSlots, makeParagraph, usePoster, useCurrentState } from '../store/usePoster'
 import { putImageBlob } from '../store/imageStore'
 import {
@@ -255,7 +254,6 @@ export function Controls() {
 
   const logo = useImage(LOGO.src)
   const papers = usePaperImages()
-  const placeholders = usePlaceholderImages()
   const [fmt, setFmt] = useState<ExportFormat>('jpg')
   const [scale, setScale] = useState(1)
 
@@ -395,7 +393,7 @@ export function Controls() {
           {PALETTES.map((p) => (
             <button
               key={p.id}
-              onClick={() => applyCategory(p.id, placeholders[p.id] ?? null)}
+              onClick={() => applyCategory(p.id, null)}
               className={`flex items-center gap-1.5 border border-black px-2 py-[7px] text-left text-xs font-bold tracking-[-0.01em] transition ${
                 s.paletteId === p.id
                   ? 'bg-black text-white'

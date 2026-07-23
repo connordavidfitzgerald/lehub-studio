@@ -1,6 +1,6 @@
 import { HEADER_MAX_RATIO, LOGO, PAD_RATIO, SECONDARY_TRACKING } from '../../config/constants'
 import { fontString, HEADER_FONT, SECONDARY_FONT } from '../../config/fonts'
-import type { HalfPosition, Paragraph, SecondaryPos } from '../../types'
+import type { GenElementKey, HalfPosition, Paragraph, SecondaryPos } from '../../types'
 import type { RenderEnv } from '../env'
 import {
   capitalizeFirst,
@@ -10,11 +10,23 @@ import {
   drawSecondaryItem,
   headerCapAscent,
   measureSecondaryItem,
+  measureBadgeBox,
+  measureSecondaryItemBox,
   type HAlign,
   type HeaderBlock,
 } from '../elements'
 import { fitHeader } from '../text/autofit'
 import { getHalftone } from '../halftone/halftoneRenderer'
+import {
+  composePreset,
+  logoBox,
+  pinnedPlacements,
+  placement,
+  slotOf,
+  splitRegions,
+  type PinnedItem,
+} from './presetPlan'
+import type { Placement } from './generativePlan'
 
 /** Paragraph-style secondary containers span this many grid columns in the split layout. */
 const SPLIT_PARA_COLS = 5
@@ -36,9 +48,10 @@ function logoWidth(env: RenderEnv): number {
  */
 function drawSecondaryGroup(
   env: RenderEnv,
-  items: Paragraph[],
+  items: Indexed[],
   half: HalfPosition,
   corner: SecondaryPos,
+  flow: Placement[],
 ): void {
   if (!items.length) return
   const { ctx, palette, w, h, shortEdge } = env
@@ -46,8 +59,11 @@ function drawSecondaryGroup(
   const size = env.secondarySize
   const paraWidth = env.g.span(SPLIT_PARA_COLS)
 
-  const regionY0 = half === 'top' ? 0 : h / 2
-  const regionH = h / 2
+  // The halves follow the (draggable) divide, not a fixed midpoint.
+  const regions = splitRegions(env.state, w, h)
+  const topH = env.state.textHalf === 'top' ? regions.text.h : regions.image.h
+  const regionY0 = half === 'top' ? 0 : topH
+  const regionH = half === 'top' ? topH : h - topH
   const isBottomCorner = corner.startsWith('bottom')
   const isRight = corner.endsWith('right')
   const align: HAlign = isRight ? 'right' : 'left'
@@ -57,7 +73,7 @@ function drawSecondaryGroup(
   const leftX = atCanvasBottom && isRight ? logoWidth(env) : 0
   const rightX = w
   const groupH = items.reduce(
-    (sum, p) => sum + measureSecondaryItem(ctx, p, size, rightX - leftX, paraWidth, pad),
+    (sum, { p }) => sum + measureSecondaryItem(ctx, p, size, rightX - leftX, paraWidth, pad),
     0,
   )
 
@@ -67,9 +83,27 @@ function drawSecondaryGroup(
   else topY = regionY0 + regionH - groupH
 
   let y = topY
-  for (const p of items) {
-    y += drawSecondaryItem(ctx, p, size, leftX, rightX, y, palette.secondaryBg, pad, align, paraWidth)
+  for (const { p, key } of items) {
+    const box = measureSecondaryItemBox(ctx, p, size, rightX - leftX, paraWidth, pad)
+    const drawn = measureSecondaryItem(ctx, p, size, rightX - leftX, paraWidth, pad)
+    flow.push(
+      placement(
+        key,
+        { x: isRight ? rightX - box.w : leftX, y, w: box.w, h: drawn },
+        align,
+        null,
+        (x, top, a) =>
+          drawSecondaryItem(ctx, p, size, x, x + box.w, top, palette.secondaryBg, pad, a, box.w),
+      ),
+    )
+    y += drawn
   }
+}
+
+/** A paragraph paired with the key its pin is stored under. */
+interface Indexed {
+  p: Paragraph
+  key: GenElementKey
 }
 
 const SECONDARY_CORNERS: SecondaryPos[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
@@ -83,12 +117,11 @@ const SECONDARY_CORNERS: SecondaryPos[] = ['top-left', 'top-right', 'bottom-left
 export function drawSplitLayout(env: RenderEnv): void {
   const { ctx, state, palette, w, h, shortEdge, renderScale } = env
   const pad = shortEdge * PAD_RATIO
-  const halfH = h / 2
   const textTop = state.textHalf === 'top'
-  const splitY = halfH
-
-  const textY0 = textTop ? 0 : halfH
-  const imageY0 = textTop ? halfH : 0
+  // The divide is draggable, so the two halves are only even until it is moved.
+  const regions = splitRegions(state, w, h)
+  const splitY = textTop ? regions.image.y : regions.image.y + regions.image.h
+  const textY0 = regions.text.y
 
   // When the image is in the bottom half, crop it so its bottom edge rests
   // above the logo (which sits bottom-left).
@@ -96,13 +129,15 @@ export function drawSplitLayout(env: RenderEnv): void {
   const logoReserve = env.logoHeight
   const imgRegion = {
     x: 0,
-    y: imageY0,
+    y: regions.image.y,
     w,
-    h: imageOnBottom ? halfH - logoReserve : halfH,
+    h: imageOnBottom ? regions.image.h - logoReserve : regions.image.h,
   }
 
-  // --- Image half (halftone) ---
-  if (state.image) {
+  // --- Image half (halftone). A planning pass wants the geometry, not the pixels. ---
+  if (env.measuring) {
+    // nothing to paint
+  } else if (state.image) {
     const ht = getHalftone(
       state.image,
       imgRegion.w * renderScale,
@@ -127,23 +162,41 @@ export function drawSplitLayout(env: RenderEnv): void {
     ctx.restore()
   }
 
+  // Elements dragged out of the preset arrangement, placed at their cells; the
+  // rest keep the layout's own composition. Everything is drawn together at the
+  // end so overlaps can be pushed apart first.
+  const pinned: PinnedItem[] = []
+  const flow: Placement[] = []
+
   // --- Text half: category badge anchored at the half's TOP-LEFT edge. ---
   const badgeTop = textY0
   const catText = capitalizeFirst(state.category)
-  const catRowH = catText
-    ? drawBadge(
-        ctx,
-        catText,
-        SECONDARY_FONT,
-        env.categorySize,
-        0,
-        badgeTop,
-        'left',
-        palette.highlight,
-        pad,
-        SECONDARY_TRACKING,
-      )
-    : 0
+  const catSlot = slotOf(state, 'category')
+  const catBox = catText
+    ? measureBadgeBox(ctx, catText, SECONDARY_FONT, env.categorySize, pad, SECONDARY_TRACKING)
+    : { w: 0, h: 0 }
+  const drawCat = (x: number, y: number, align: HAlign) =>
+    drawBadge(
+      ctx,
+      catText,
+      SECONDARY_FONT,
+      env.categorySize,
+      align === 'center' ? x + catBox.w / 2 : align === 'right' ? x + catBox.w : x,
+      y,
+      align,
+      palette.highlight,
+      pad,
+      SECONDARY_TRACKING,
+    )
+  let catRowH = 0
+  if (catText && catSlot) {
+    pinned.push({ key: 'category', box: catBox, slot: catSlot, drawAt: drawCat })
+  } else if (catText) {
+    catRowH = catBox.h
+    flow.push(
+      placement('category', { x: 0, y: badgeTop, w: catBox.w, h: catRowH }, 'left', null, drawCat),
+    )
+  }
 
   // --- Secondary text ---
   // Text-half items keep their corners; only the corner pressed against the centre
@@ -152,16 +205,33 @@ export function drawSplitLayout(env: RenderEnv): void {
   // Image-half items keep their corner slots over the image.
   const secSize = env.secondarySize
   const paraWidth = env.g.span(SPLIT_PARA_COLS)
-  const secItems = state.paragraphs.filter((p) => p.text.trim() !== '')
+  // Keys ride along so a dragged block writes back to the right entry. Pinned
+  // blocks have left the corner arrangement, so they are held aside here.
+  const allItems: Indexed[] = state.paragraphs
+    .map((p, i) => ({ p, key: `p${i}` as GenElementKey }))
+    .filter(({ p }) => p.text.trim() !== '')
+  const secItems = allItems.filter(({ key }) => !slotOf(state, key))
 
-  const textItems = secItems.filter((p) => p.half === state.textHalf)
-  const groupAt = (pos: SecondaryPos) => textItems.filter((p) => p.position === pos)
-  const measureGroup = (items: Paragraph[]) =>
-    items.reduce((sum, p) => sum + measureSecondaryItem(ctx, p, secSize, w, paraWidth, pad), 0)
-  const drawGroup = (items: Paragraph[], topY: number, align: HAlign) => {
+  const textItems = secItems.filter(({ p }) => p.half === state.textHalf)
+  const groupAt = (pos: SecondaryPos) => textItems.filter(({ p }) => p.position === pos)
+  const measureGroup = (items: Indexed[]) =>
+    items.reduce((sum, { p }) => sum + measureSecondaryItem(ctx, p, secSize, w, paraWidth, pad), 0)
+  const drawGroup = (items: Indexed[], topY: number, align: HAlign) => {
     let y = topY
-    for (const p of items) {
-      y += drawSecondaryItem(ctx, p, secSize, 0, w, y, palette.secondaryBg, pad, align, paraWidth)
+    for (const { p, key } of items) {
+      const box = measureSecondaryItemBox(ctx, p, secSize, w, paraWidth, pad)
+      const drawn = measureSecondaryItem(ctx, p, secSize, w, paraWidth, pad)
+      flow.push(
+        placement(
+          key,
+          { x: align === 'right' ? w - box.w : 0, y, w: box.w, h: drawn },
+          align,
+          null,
+          (x, top, a) =>
+            drawSecondaryItem(ctx, p, secSize, x, x + box.w, top, palette.secondaryBg, pad, a, box.w),
+        ),
+      )
+      y += drawn
     }
   }
   const topLeft = groupAt('top-left')
@@ -213,29 +283,70 @@ export function drawSplitLayout(env: RenderEnv): void {
   const { size } = fitHeader(ctx, lines, HEADER_FONT, w, pad, availH, shortEdge * HEADER_MAX_RATIO)
   const lineAdvance = headerCapAscent(ctx, size) + 2 * pad
   const blockH = lines.length * lineAdvance
-  const block: HeaderBlock = {
-    lines,
-    size,
-    containerX: 0,
-    containerWidth: w,
-    align: 'left',
-    lineAdvance,
+  const drawHeader = (x: number, y: number, align: HAlign) => {
+    const block: HeaderBlock = {
+      lines,
+      size,
+      containerX: x,
+      containerWidth: w,
+      align,
+      lineAdvance,
+    }
+    drawHeaderBlock(ctx, block, y, shortEdge)
   }
   headerTop = textTop ? splitY - botSecH - blockH : availTop + topSecH
 
   drawGroup(topLeft, topLeftTop, 'left')
   drawGroup(topRight, topRightTop, 'right')
-  drawHeaderBlock(ctx, block, headerTop, shortEdge)
+  const headerSlot = slotOf(state, 'header')
+  if (headerSlot) {
+    pinned.push({ key: 'header', box: { w, h: blockH }, slot: headerSlot, drawAt: drawHeader })
+  } else {
+    flow.push(placement('header', { x: 0, y: headerTop, w, h: blockH }, 'left', null, drawHeader))
+  }
   drawGroup(botLeft, botLeftTop, 'left')
   drawGroup(botRight, botRightTop, 'right')
 
   // Image-half secondaries keep their corner slots (over the image).
   const imageHalf: HalfPosition = textTop ? 'bottom' : 'top'
   for (const corner of SECONDARY_CORNERS) {
-    const group = secItems.filter((p) => p.half === imageHalf && p.position === corner)
-    drawSecondaryGroup(env, group, imageHalf, corner)
+    const group = secItems.filter(({ p }) => p.half === imageHalf && p.position === corner)
+    drawSecondaryGroup(env, group, imageHalf, corner, flow)
   }
 
-  // Logo: bottom-left corner of the poster.
-  drawLogo(ctx, env.assets.logo, 0, h, env.logoHeight, LOGO.fallbackText, 'left')
+  // Pinned paragraphs sit wherever they were dropped, at their own width.
+  const paraWidthPinned = env.g.span(SPLIT_PARA_COLS)
+  for (const { p, key } of allItems) {
+    const slot = slotOf(state, key)
+    if (!slot) continue
+    const box = measureSecondaryItemBox(ctx, p, secSize, w, paraWidthPinned, pad)
+    pinned.push({
+      key,
+      box,
+      slot,
+      drawAt: (x, top, align) =>
+        drawSecondaryItem(ctx, p, secSize, x, x + box.w, top, palette.secondaryBg, pad, align, box.w),
+    })
+  }
+
+  // Logo: bottom-left corner of the poster, unless it has been pinned elsewhere.
+  const logo = logoBox(env)
+  const logoSlot = slotOf(state, 'logo')
+  if (logoSlot) {
+    pinned.push({
+      key: 'logo',
+      box: logo,
+      slot: logoSlot,
+      drawAt: (x, top) =>
+        drawLogo(ctx, env.assets.logo, x, top + logo.h, env.logoHeight, LOGO.fallbackText, 'left'),
+    })
+  } else {
+    flow.push(
+      placement('logo', { x: 0, y: h - logo.h, w: logo.w, h: logo.h }, 'left', null, (x, top) =>
+        drawLogo(ctx, env.assets.logo, x, top + logo.h, env.logoHeight, LOGO.fallbackText, 'left'),
+      ),
+    )
+  }
+
+  composePreset(env, [...flow, ...pinnedPlacements(env, pinned)])
 }

@@ -4,6 +4,8 @@ import { useFontsReady } from '../hooks/useFontsReady'
 import { useGenerativeDrag } from '../hooks/useGenerativeDrag'
 import { useImage } from '../hooks/useImage'
 import { usePaperImages } from '../hooks/usePaperImages'
+import { usePresetDrag } from '../hooks/usePresetDrag'
+import { isPresetLayout } from '../render/layouts/presetPlan'
 import { renderPoster } from '../render/renderPoster'
 import { useCurrentState } from '../store/usePoster'
 
@@ -18,7 +20,10 @@ export function PosterPreview() {
   // Stable identity: the drag planner re-plans whenever `assets` changes.
   const assets = useMemo(() => ({ logo, papers }), [logo, papers])
 
-  const { preview, cursor, handlers } = useGenerativeDrag(
+  // Exactly one of these is live at a time: the generative layout has its own
+  // planner and free 3×3 placement, the preset layouts snap between the
+  // positions they already define.
+  const generative = useGenerativeDrag(
     canvasRef,
     state,
     aspect.w,
@@ -26,6 +31,16 @@ export function PosterPreview() {
     assets,
     state.layout === 'generative' && fontsReady,
   )
+  const preset = usePresetDrag(
+    canvasRef,
+    state,
+    aspect.w,
+    aspect.h,
+    assets,
+    isPresetLayout(state.layout) && fontsReady,
+  )
+  const { overlay, cursor, handlers } =
+    state.layout === 'generative' ? generative : preset
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -46,61 +61,54 @@ export function PosterPreview() {
           style={{ width: 'auto', height: 'auto', imageRendering: 'auto', cursor, touchAction: 'none' }}
           className="block max-h-[85vh] max-w-full border border-black"
         />
-        {preview && (
+        {overlay && (
           // Drop feedback only — never drawn into the canvas, so exports stay clean.
           <svg
             viewBox={`0 0 ${aspect.w} ${aspect.h}`}
             preserveAspectRatio="none"
             className="pointer-events-none absolute inset-0 h-full w-full"
           >
-            {preview.region && (
+            {overlay.region && (
               <rect
-                x={preview.region.x}
-                y={preview.region.y}
-                width={preview.region.w}
-                height={preview.region.h}
+                x={overlay.region.x}
+                y={overlay.region.y}
+                width={overlay.region.w}
+                height={overlay.region.h}
                 fill="rgba(0,0,0,0.04)"
               />
             )}
-            {preview.targets.map((t, i) => (
+            {overlay.markers.map((m, i) => (
               <circle
                 key={i}
-                cx={t.anchor.x}
-                cy={t.anchor.y}
+                cx={m.x}
+                cy={m.y}
                 r={aspect.w * 0.006}
-                fill={
-                  preview.slot &&
-                  preview.slot.region === t.region &&
-                  preview.slot.v === t.v &&
-                  preview.slot.h === t.h
-                    ? '#FF669E'
-                    : 'rgba(0,0,0,0.35)'
-                }
+                fill={m.active ? '#FF669E' : 'rgba(0,0,0,0.35)'}
               />
             ))}
             <rect
-              x={preview.ghost.x}
-              y={preview.ghost.y}
-              width={preview.ghost.w}
-              height={preview.ghost.h}
+              x={overlay.ghost.x}
+              y={overlay.ghost.y}
+              width={overlay.ghost.w}
+              height={overlay.ghost.h}
               fill="rgba(255,102,158,0.15)"
               stroke="#FF669E"
               strokeWidth={aspect.w * 0.004}
             />
             {/* Resizing: show the room the text is left with, and the grid it snaps to. */}
-            {preview.textZone && (
+            {overlay.textZone && (
               <rect
-                x={preview.textZone.x}
-                y={preview.textZone.y}
-                width={preview.textZone.w}
-                height={preview.textZone.h}
+                x={overlay.textZone.x}
+                y={overlay.textZone.y}
+                width={overlay.textZone.w}
+                height={overlay.textZone.h}
                 fill="none"
                 stroke="rgba(0,0,0,0.35)"
                 strokeDasharray={`${aspect.w * 0.012} ${aspect.w * 0.012}`}
                 strokeWidth={aspect.w * 0.002}
               />
             )}
-            {preview.gridLines?.map((g, i) => (
+            {overlay.gridLines?.map((g, i) => (
               <line
                 key={i}
                 x1={g.x1}

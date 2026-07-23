@@ -23,8 +23,13 @@ export interface Palette {
 export interface PaperPreset {
   id: string
   label: string
-  /** null = "None". Otherwise a URL/import to the texture image. */
+  /** null = "None". Otherwise a URL/import to the full-resolution texture. */
   src: string | null
+  /**
+   * Small stand-in shown while `src` downloads. Every paper is enabled by
+   * default, so the previews give the first paint a texture in a few KB.
+   */
+  previewSrc: string | null
   blend: GlobalCompositeOperation
   defaultOpacity: number
 }
@@ -113,6 +118,13 @@ export interface Paragraph {
   style: SecondaryStyle
   /** Generative layout: pinned position from dragging it on the canvas. */
   genSlot?: GenSlot | null
+  /**
+   * Preset layouts: pinned position from dragging it on the canvas. Kept apart
+   * from `genSlot` so a poster dragged in one layout family doesn't arrive
+   * rearranged in the other — the compositions have nothing to do with
+   * each other.
+   */
+  presetSlot?: GenSlot | null
 }
 
 export interface PosterState {
@@ -144,6 +156,16 @@ export interface PosterState {
   editorialHeaderAlign: TextAlign
   /** Editorial layout: header size (constant subheader sizes, or fit-to-width). */
   editorialHeaderSize: EditorialHeaderSize
+  /**
+   * Editorial layout: header span in grid columns, from dragging its free edge.
+   * `null`/absent spans the full width.
+   */
+  editorialHeaderCols?: number | null
+  /**
+   * Centered layout: header span in grid columns, from dragging its edge.
+   * Overrides `headerWidth`; `null`/absent defers to it.
+   */
+  centeredHeaderCols?: number | null
   /** Generative layout: RNG seed that determines the procedural arrangement. */
   seed: number
   /** Generative layout: main slide (pink header) or secondary slide (secondary colour). */
@@ -160,6 +182,14 @@ export interface PosterState {
   /** Generative layout: where the image band sits (`auto` = seeded position). */
   genImageAlign: GenImageAlign
   /**
+   * Generative layout: the axis the image band spans, from dragging a full-bleed
+   * image in by one of its edges. The seeded mode decides this until an edge is
+   * dragged — grabbing the top or bottom of a full-bleed image makes a horizontal
+   * band ('y'), the left or right a vertical one ('x'). `null`/absent keeps the
+   * seeded axis.
+   */
+  genImageAxis?: 'x' | 'y' | null
+  /**
    * Generative layout: image band size in grid units (tenths of the axis it
    * spans), from dragging its inner edge. `null`/absent keeps the seeded size.
    * Sized past the point where the text would be squeezed below its minimum, the
@@ -170,6 +200,15 @@ export interface PosterState {
   genHeaderSlot?: GenSlot | null
   genCategorySlot?: GenSlot | null
   genLogoSlot?: GenSlot | null
+  /** Preset layouts: pinned positions, kept separate from the generative ones. */
+  presetHeaderSlot?: GenSlot | null
+  presetCategorySlot?: GenSlot | null
+  presetLogoSlot?: GenSlot | null
+  /**
+   * Split layout: the fraction of the canvas the image half takes, from dragging
+   * the divider. `null`/absent splits it evenly.
+   */
+  splitRatio?: number | null
 
   image: HTMLImageElement | null
   /**

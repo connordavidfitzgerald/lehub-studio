@@ -1,4 +1,5 @@
 import { ASPECTS } from '../config/constants'
+import { getPaperImages, papersReady } from '../hooks/usePaperImages'
 import type { PosterState } from '../types'
 import type { RenderAssets } from './env'
 import { renderPoster } from './renderPoster'
@@ -16,6 +17,9 @@ export async function exportPoster(
   scale = 1,
   quality = 0.92,
 ): Promise<void> {
+  // The preview may still be showing low-res stand-in textures; an export must
+  // never bake one in, so wait for the real files first.
+  await papersReady()
   const aspect = ASPECTS.find((a) => a.id === state.aspect)!
   const w = Math.round(aspect.w * scale)
   const h = Math.round(aspect.h * scale)
@@ -24,7 +28,8 @@ export async function exportPoster(
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')!
-  renderPoster(ctx, state, w, h, assets, scale)
+  // `assets` was captured before the await, so take the textures fresh.
+  renderPoster(ctx, state, w, h, { ...assets, papers: getPaperImages() }, scale)
 
   const mime = format === 'png' ? 'image/png' : 'image/jpeg'
   const blob = await new Promise<Blob | null>((resolve) =>

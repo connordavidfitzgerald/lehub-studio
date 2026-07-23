@@ -62,14 +62,29 @@ function categoryFields(id: string, image: HTMLImageElement | null) {
   }
 }
 
-// --- Generative slot plumbing. A pin lives with the thing it moves: header,
-//     category and logo on the poster state, secondaries on their paragraph. ---
+// --- Slot plumbing. A pin lives with the thing it moves: header, category and
+//     logo on the poster state, secondaries on their paragraph. The generative
+//     layout and the preset layouts keep separate pins — their compositions have
+//     nothing in common, so a drag in one must not rearrange the other. ---
 
 const SLOT_FIELD = {
   header: 'genHeaderSlot',
   category: 'genCategorySlot',
   logo: 'genLogoSlot',
 } as const
+
+const PRESET_SLOT_FIELD = {
+  header: 'presetHeaderSlot',
+  category: 'presetCategorySlot',
+  logo: 'presetLogoSlot',
+} as const
+
+/** Which set of pin fields this poster's layout writes to. */
+const fieldsFor = (s: PosterState) =>
+  s.layout === 'generative' ? SLOT_FIELD : PRESET_SLOT_FIELD
+
+const paraFieldFor = (s: PosterState) =>
+  s.layout === 'generative' ? ('genSlot' as const) : ('presetSlot' as const)
 
 /** Every element that can currently hold a pin, in a stable order. */
 function slotKeys(s: PosterState): GenElementKey[] {
@@ -83,19 +98,22 @@ function slotKeys(s: PosterState): GenElementKey[] {
 
 function readSlot(s: PosterState, key: GenElementKey): GenSlot | null {
   if (key === 'image') return null
-  if (key in SLOT_FIELD) return s[SLOT_FIELD[key as keyof typeof SLOT_FIELD]] ?? null
+  const fields = fieldsFor(s)
+  if (key in fields) return s[fields[key as keyof typeof fields]] ?? null
   const i = Number(key.slice(1))
-  return s.paragraphs[i]?.genSlot ?? null
+  return s.paragraphs[i]?.[paraFieldFor(s)] ?? null
 }
 
 function writeSlot(s: PosterState, key: GenElementKey, slot: GenSlot | null): PosterState {
   if (key === 'image') return s
-  if (key in SLOT_FIELD) return { ...s, [SLOT_FIELD[key as keyof typeof SLOT_FIELD]]: slot }
+  const fields = fieldsFor(s)
+  if (key in fields) return { ...s, [fields[key as keyof typeof fields]]: slot }
   const i = Number(key.slice(1))
   if (!s.paragraphs[i]) return s
+  const field = paraFieldFor(s)
   return {
     ...s,
-    paragraphs: s.paragraphs.map((p, idx) => (idx === i ? { ...p, genSlot: slot } : p)),
+    paragraphs: s.paragraphs.map((p, idx) => (idx === i ? { ...p, [field]: slot } : p)),
   }
 }
 
@@ -107,9 +125,22 @@ const sameCell = (a: GenSlot | null, b: GenSlot) =>
  * poster to its purely seeded composition.
  */
 function clearSlots(s: PosterState): PosterState {
+  if (s.layout !== 'generative') {
+    return {
+      ...s,
+      editorialHeaderCols: null,
+      centeredHeaderCols: null,
+      splitRatio: null,
+      presetHeaderSlot: null,
+      presetCategorySlot: null,
+      presetLogoSlot: null,
+      paragraphs: s.paragraphs.map((p) => (p.presetSlot ? { ...p, presetSlot: null } : p)),
+    }
+  }
   return {
     ...s,
     genImageSize: null,
+    genImageAxis: null,
     genHeaderCols: null,
     genHeaderSlot: null,
     genCategorySlot: null,
@@ -138,8 +169,19 @@ export function applyGenSlot(
   return others.reduce((acc, k, i) => writeSlot(acc, k, { ...readSlot(acc, k)!, order: i }), next)
 }
 
-/** True when anything on this poster has been dragged out of the seeded flow. */
+/** True when anything on this poster has been dragged out of its layout's flow. */
 export function hasGenSlots(s: PosterState): boolean {
+  if (s.layout !== 'generative') {
+    return (
+      s.editorialHeaderCols != null ||
+      s.centeredHeaderCols != null ||
+      s.splitRatio != null ||
+      !!s.presetHeaderSlot ||
+      !!s.presetCategorySlot ||
+      !!s.presetLogoSlot ||
+      s.paragraphs.some((p) => p.presetSlot)
+    )
+  }
   return (
     s.genImageSize != null ||
     s.genHeaderCols != null ||
@@ -211,6 +253,12 @@ interface PosterStore {
   redo: () => void
 
   set: <K extends keyof PosterState>(key: K, value: PosterState[K]) => void
+  /**
+   * Set several fields as one edit, so a gesture that moves more than one field
+   * (resizing the generative image sets its axis, side and size together) costs
+   * a single undo step rather than one per field.
+   */
+  setMany: (fields: Partial<PosterState>, tag?: string) => void
   setHalftone: <K extends keyof HalftoneParams>(
     key: K,
     value: HalftoneParams[K],
@@ -361,6 +409,13 @@ export const usePoster = create<PosterStore>((set) => ({
     tagged(`set:${String(key)}`, () =>
       set((store) => ({
         artboards: mapCurrent(store, (s) => ({ ...s, [key]: value })),
+      })),
+    ),
+
+  setMany: (fields, tagName) =>
+    tagged(tagName ?? `set:${Object.keys(fields).sort().join(',')}`, () =>
+      set((store) => ({
+        artboards: mapCurrent(store, (s) => ({ ...s, ...fields })),
       })),
     ),
 

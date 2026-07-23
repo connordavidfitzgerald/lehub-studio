@@ -7,7 +7,7 @@ import {
 } from '../../config/constants'
 import { HEADER_FONT, SECONDARY_FONT } from '../../config/fonts'
 import type { GenElementKey, GenSlot, GenSlotH, GenSlotV, Paragraph } from '../../types'
-import type { RenderEnv } from '../env'
+import type { Rect, RenderEnv } from '../env'
 import {
   capitalizeFirst,
   drawBadge,
@@ -34,7 +34,7 @@ export function mulberry32(seed: number) {
   }
 }
 
-export type Rect = { x: number; y: number; w: number; h: number }
+export type { Rect }
 /** Which end of its axis the image band hugs. It is never centred. */
 export type BandPos = 'start' | 'end'
 export type ImageMode = 'band-top' | 'band-bottom' | 'band-left' | 'band-right' | 'full'
@@ -133,8 +133,12 @@ export interface GenerativePlan {
   imgRect: Rect | null
   /** The axis the image band slides along; null when full-bleed (can't move). */
   imageAxis: 'vertical' | 'horizontal' | null
-  /** Drag this to resize the band; null when the seed made it full-bleed. */
-  resizeEdge: ResizeEdge | null
+  /**
+   * Edges that can be dragged to resize the image. A band offers its one inner
+   * edge; a full-bleed image offers all four sides, since which one you pull in
+   * decides the axis and the side the band ends up hugging.
+   */
+  resizeEdges: ResizeEdge[]
   /** Header span in grid columns, and the widest it may get in its zone. */
   headerCols: number
   headerMaxCols: number
@@ -211,7 +215,7 @@ function regionSlots(region: GenSlot['region'], rect: Rect): SlotTarget[] {
 }
 
 /** A positioned element, before overlaps between elements have been resolved. */
-interface Placement {
+export interface Placement {
   key: ElementKey
   rect: Rect
   slot: GenSlot | null
@@ -228,7 +232,7 @@ interface Placement {
  * parks it underneath). Pinned elements then beat the seeded flow, which is what
  * makes a drop land where it was aimed.
  */
-function priorityOf(key: ElementKey, pinned: boolean): number {
+export function priorityOf(key: ElementKey, pinned: boolean): number {
   if (key === 'category') return 0
   if (key === 'logo') return 1
   return pinned ? 2 : 3
@@ -252,7 +256,7 @@ const intersects = (a: Rect, b: Rect) =>
  * everything already settled: down by preference, up when there is no room
  * below. Whole stacks stay contiguous because each member pushes the next.
  */
-function resolveOverlaps(placed: Placement[], h: number): Placement[] {
+export function resolveOverlaps(placed: Placement[], h: number): Placement[] {
   const order = placed
     .map((p, i) => ({ p, i }))
     .sort((a, b) => a.p.priority - b.p.priority || a.p.rect.y - b.p.rect.y || a.i - b.i)
@@ -331,9 +335,14 @@ export function planGenerative(env: RenderEnv): GenerativePlan {
   // point where the text zone would fall below its minimum, the band gives up and
   // the image goes full-bleed with the text over it.
   const bandUnits = clampBandUnits(state.genImageSize ?? bandFrac)
-  const bandAxis: 'x' | 'y' = imageAlignAxis(imageModePick) === 'vertical' ? 'y' : 'x'
+  // Dragging a full-bleed image in by an edge picks the axis; until then it comes
+  // from the seeded mode.
+  const bandAxis: 'x' | 'y' =
+    state.genImageAxis ?? (imageAlignAxis(imageModePick) === 'vertical' ? 'y' : 'x')
+  // A seeded `full` has no band size of its own, so it stays full-bleed until an
+  // edge is dragged in — which is what setting `genImageSize` records.
   const imageIsFull =
-    imageModePick === 'full' || bandFillsCanvas(bandUnits)
+    (imageModePick === 'full' && state.genImageSize == null) || bandFillsCanvas(bandUnits)
 
   let tz: Rect = { x: 0, y: 0, w, h }
   let imgRect: Rect | null = null
@@ -721,29 +730,33 @@ export function planGenerative(env: RenderEnv): GenerativePlan {
   const slots: SlotTarget[] = regionSlots('text', tz)
   if (imgRect) slots.push(...regionSlots('image', imgRect))
 
-  // The resize handle sits on the band's inner edge. Once the image has gone
-  // full-bleed that edge has reached the far side of the canvas — dragging it
-  // back inward re-forms the band, so the handle never disappears.
-  let resizeEdge: ResizeEdge | null = null
-  if (imgRect && imageModePick !== 'full') {
-    const len = bandAxis === 'y' ? h : w
+  // The resize handle sits on the band's inner edge. Once the image is full-bleed
+  // every edge has reached a side of the canvas, so all four become handles:
+  // pulling one inward re-forms the band on the opposite side. An edge dragged
+  // from the canvas start leaves the band hugging the end, and vice versa.
+  let resizeEdges: ResizeEdge[] = []
+  if (imgRect && imageIsFull) {
+    resizeEdges = [
+      { axis: 'y', pos: 0, from: 'end', units: GRID_UNITS },
+      { axis: 'y', pos: h, from: 'start', units: GRID_UNITS },
+      { axis: 'x', pos: 0, from: 'end', units: GRID_UNITS },
+      { axis: 'x', pos: w, from: 'start', units: GRID_UNITS },
+    ]
+  } else if (imgRect) {
     const textAfterBand = bandPos === 'start'
     const near = bandAxis === 'y' ? imgRect.y : imgRect.x
     const far = bandAxis === 'y' ? imgRect.y + imgRect.h : imgRect.x + imgRect.w
-    resizeEdge = {
-      axis: bandAxis,
-      pos: imageIsFull ? (textAfterBand ? len : 0) : textAfterBand ? far : near,
-      from: bandPos,
-      units: bandUnits,
-    }
+    resizeEdges = [
+      { axis: bandAxis, pos: textAfterBand ? far : near, from: bandPos, units: bandUnits },
+    ]
   }
 
   return {
     elements,
     textZone: tz,
     imgRect,
-    imageAxis: imgRect && !imageIsFull ? imageAlignAxis(imageModePick) : null,
-    resizeEdge,
+    imageAxis: imgRect && !imageIsFull ? (bandAxis === 'y' ? 'vertical' : 'horizontal') : null,
+    resizeEdges,
     headerCols: spanCols,
     headerMaxCols: tzCols,
     // Only a band *beside* the text shares the header's axis, so only that one can

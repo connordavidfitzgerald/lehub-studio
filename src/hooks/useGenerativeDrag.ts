@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
-import type { RenderAssets } from '../render/env'
+import type { DragOverlay, RenderAssets } from '../render/env'
 import {
   anchorX,
   anchorY,
@@ -151,6 +151,7 @@ export function useGenerativeDrag(
 ) {
   const setGenSlot = usePoster((st) => st.setGenSlot)
   const set = usePoster((st) => st.set)
+  const setMany = usePoster((st) => st.setMany)
   const [drag, setDrag] = useState<Drag | null>(null)
   // The cursor doubles as the affordance: grab for a move, a resize arrow on the
   // band's edge.
@@ -341,12 +342,23 @@ export function useGenerativeDrag(
     [resolve, resolveImage, planFor, state, w, h],
   )
 
-  /** The band's edge wins the press when the pointer is right on it. */
+  /**
+   * The image's edge wins the press when the pointer is right on it. A full-bleed
+   * image offers all four, and its corners are within reach of two — the nearer
+   * one takes the drag.
+   */
   const edgeAt = useCallback(
     (p: { x: number; y: number }): ResizeEdge | null => {
-      const edge = plan?.resizeEdge
-      if (!edge) return null
-      return Math.abs((edge.axis === 'y' ? p.y : p.x) - edge.pos) <= EDGE_GRAB ? edge : null
+      let best: ResizeEdge | null = null
+      let bestDist = EDGE_GRAB
+      for (const edge of plan?.resizeEdges ?? []) {
+        const dist = Math.abs((edge.axis === 'y' ? p.y : p.x) - edge.pos)
+        if (dist <= bestDist) {
+          bestDist = dist
+          best = edge
+        }
+      }
+      return best
     },
     [plan],
   )
@@ -413,25 +425,37 @@ export function useGenerativeDrag(
     [drag, plan, toPoster, update, edgeAt],
   )
 
+  // Commit outside the `setDrag` updater: React runs updater functions during the
+  // render phase, and a store write from there updates other components mid-render.
   const finish = useCallback(
     (commit: boolean) => {
-      setDrag((d) => {
-        if (d && commit && d.moved) {
-          if (d.headerResize) {
-            if (d.cols !== null) set('genHeaderCols', d.cols)
-            if (d.imageSize !== null) set('genImageSize', d.imageSize)
-          } else if (d.resize) {
-            if (d.units !== null && d.units !== d.resize.units) set('genImageSize', d.units)
-          } else if (d.key === 'image') {
-            if (d.imageAlign) set('genImageAlign', d.imageAlign)
-          } else if (d.preview.slot) {
-            setGenSlot(d.key, d.preview.slot)
+      const d = drag
+      setDrag(null)
+      if (d && commit && d.moved) {
+        if (d.headerResize) {
+          if (d.cols !== null) set('genHeaderCols', d.cols)
+          if (d.imageSize !== null) set('genImageSize', d.imageSize)
+        } else if (d.resize) {
+          // Which edge was pulled decides the band's axis and the side it hugs,
+          // so a full-bleed image can be brought in from any of the four.
+          if (d.units !== null && d.units !== d.resize.units) {
+            setMany(
+              {
+                genImageAxis: d.resize.axis,
+                genImageAlign: d.resize.from,
+                genImageSize: d.units,
+              },
+              'gen:image-resize',
+            )
           }
+        } else if (d.key === 'image') {
+          if (d.imageAlign) set('genImageAlign', d.imageAlign)
+        } else if (d.preview.slot) {
+          setGenSlot(d.key, d.preview.slot)
         }
-        return null
-      })
+      }
     },
-    [set, setGenSlot],
+    [drag, set, setMany, setGenSlot],
   )
 
   const onPointerUp = useCallback(() => finish(true), [finish])
@@ -448,9 +472,28 @@ export function useGenerativeDrag(
     return () => window.removeEventListener('keydown', onKey)
   }, [drag, finish])
 
+  const preview = drag && drag.moved ? drag.preview : null
+  // Flatten to the shape the preview's overlay renders, so both drag hooks feed
+  // it the same thing.
+  const overlay: DragOverlay | null = preview && {
+    ghost: preview.ghost,
+    region: preview.region,
+    markers: preview.targets.map((t) => ({
+      x: t.anchor.x,
+      y: t.anchor.y,
+      active:
+        !!preview.slot &&
+        preview.slot.region === t.region &&
+        preview.slot.v === t.v &&
+        preview.slot.h === t.h,
+    })),
+    textZone: preview.textZone,
+    gridLines: preview.gridLines,
+  }
+
   return {
     /** Non-null while dragging: everything the overlay needs to draw. */
-    preview: drag && drag.moved ? drag.preview : null,
+    overlay,
     cursor: drag
       ? drag.headerResize
         ? 'col-resize'

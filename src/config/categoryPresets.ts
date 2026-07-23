@@ -1,7 +1,7 @@
 import type { LayoutId } from '../types'
-import eventImg from '../assets/placeholders/event.png'
-import infoImg from '../assets/placeholders/info.png'
-import resourceImg from '../assets/placeholders/resource.png'
+import eventImg from '../assets/placeholders/event.webp'
+import infoImg from '../assets/placeholders/info.webp'
+import resourceImg from '../assets/placeholders/resource.webp'
 
 /**
  * Placeholder content applied when a category is selected. Populates the header,

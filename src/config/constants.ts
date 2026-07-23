@@ -1,5 +1,5 @@
 import type { Aspect, HalftoneParams } from "../types";
-import logo from "../assets/logo.png";
+import logo from "../assets/logo.webp";
 
 /** The fixed brand pink — used ONLY for the notched header outline stroke. */
 export const OUTLINE_COLOR = "#FF669E";
